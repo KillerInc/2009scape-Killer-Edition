@@ -38,13 +38,21 @@ jobs:
           cache: maven
           cache-dependency-path: Server/pom.xml
 
+      - name: Restore incremental server build
+        uses: actions/cache@v4
+        with:
+          path: Server/target
+          key: server-target-${{ runner.os }}-${{ hashFiles('Server/pom.xml') }}-${{ github.sha }}
+          restore-keys: |
+            server-target-${{ runner.os }}-${{ hashFiles('Server/pom.xml') }}-
+
       - name: Build server JAR
         working-directory: Server
         shell: bash
         run: |
           set -euo pipefail
           chmod +x mvnw
-          ./mvnw package -DskipTests
+          ./mvnw package -Dmaven.test.skip=true
           JAR="$(ls -1t target/*-jar-with-dependencies.jar | head -1)"
           cp "$JAR" server.jar
           test -s server.jar
