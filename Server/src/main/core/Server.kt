@@ -10,6 +10,7 @@ import core.net.websocket.GameWebSocketServer
 import core.net.websocket.WebSocketTls
 import core.tools.Log
 import core.tools.NetworkReachability
+import core.tools.gui.ServerControl
 import core.tools.TimeStamp
 import kotlinx.coroutines.*
 import java.io.File
@@ -60,6 +61,10 @@ object Server {
     @Throws(Throwable::class)
     @JvmStatic
     fun main(args: Array<String>) {
+        if (args.firstOrNull() == "--gui") {
+            ServerControl.main(emptyArray())
+            return
+        }
         if (args.isNotEmpty()) {
             log(this::class.java, Log.INFO, "Using config file: ${args[0]}")
             ServerConfigParser.parse(args[0])
