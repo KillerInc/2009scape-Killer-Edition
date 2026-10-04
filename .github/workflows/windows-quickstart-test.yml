@@ -1,0 +1,31 @@
+name: Windows Quick Start Test
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "setup.bat"
+      - "server.bat"
+      - "run-server.bat"
+      - "Tools/setup-windows.ps1"
+      - ".github/workflows/windows-quickstart-test.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  quickstart:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          lfs: true
+      - name: Run one-click setup
+        shell: cmd
+        run: setup.bat
+      - name: Verify outputs
+        shell: powershell
+        run: |
+          if (-not (Test-Path ".runtime\jdk-11\bin\java.exe")) { throw "Private JDK missing" }
+          if (-not (Test-Path "Server\server.jar")) { throw "Server JAR missing" }
+          & ".runtime\jdk-11\bin\java.exe" -version
