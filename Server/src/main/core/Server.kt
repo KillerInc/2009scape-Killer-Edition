@@ -99,7 +99,10 @@ object Server {
             while(scanner.hasNextLine()){
                 val command = scanner.nextLine()
                 when(command){
-                    "stop" -> exitProcess(0)
+                    "stop" -> {
+                        SystemManager.flag(SystemState.TERMINATED)
+                        exitProcess(0)
+                    }
 
                     "update" -> SystemManager.flag(SystemState.UPDATING)
                     "help","commands" -> printCommands()
