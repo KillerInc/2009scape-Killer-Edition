@@ -2,6 +2,10 @@ name: Build Killer Edition Release
 
 on:
   workflow_dispatch:
+  # Normal pushes never build a release. Advancing the dedicated release branch is the manual release trigger.
+  push:
+    branches:
+      - release
 
 permissions:
   contents: write
