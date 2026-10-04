@@ -1,3 +1,34 @@
+# 2009Scape Killer Edition - Quick Start
+
+Two Windows setup methods are supported.
+
+**Git clone**
+
+```bat
+git clone https://github.com/KillerInc/2009scape-Killer-Edition.git
+cd 2009scape-Killer-Edition
+setup.bat
+```
+
+After setup completes, start the server with:
+
+```bat
+server.bat
+```
+
+**Release ZIP**
+
+Download the latest `2009scape-Killer-Edition_vX.Y.zip` from GitHub Releases, extract it, then run:
+
+```bat
+setup.bat
+server.bat
+```
+
+The Killer Edition release ZIP includes the real Git LFS/cache files and a prebuilt `Server\server.jar`, so Git and Git LFS are not required for the ZIP install. Setup downloads a private Java runtime into `.runtime` and does not replace or modify your system Java installation.
+
+---
+
 [![AGPL-3.0 License][license-shield]][license-url]
 
 <br />
