@@ -35,6 +35,8 @@ jobs:
         with:
           distribution: temurin
           java-version: '11'
+          cache: maven
+          cache-dependency-path: Server/pom.xml
 
       - name: Build server JAR
         working-directory: Server
@@ -42,7 +44,7 @@ jobs:
         run: |
           set -euo pipefail
           chmod +x mvnw
-          ./mvnw clean package -DskipTests
+          ./mvnw package -DskipTests
           JAR="$(ls -1t target/*-jar-with-dependencies.jar | head -1)"
           cp "$JAR" server.jar
           test -s server.jar
@@ -83,7 +85,7 @@ jobs:
           test -s "$STAGE/Server/data/cache/main_file_cache.dat2"
 
           cd "$RUNNER_TEMP"
-          zip -q -r "$NAME" "2009scape-Killer-Edition"
+          7z a -tzip -mx=1 -mmt=on "$NAME" "2009scape-Killer-Edition" >/dev/null
 
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
