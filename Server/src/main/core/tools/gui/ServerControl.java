@@ -100,19 +100,24 @@ public final class ServerControl {
         JPanel rootPanel = new JPanel(new BorderLayout(8, 8));
         rootPanel.setBorder(new EmptyBorder(10, 10, 10, 10));
 
-        JPanel statusPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 16, 0));
-        statusPanel.add(new JLabel("Status:"));
-        statusPanel.add(statusLabel);
-        statusPanel.add(new JLabel("Uptime:"));
-        statusPanel.add(uptimeLabel);
-        statusPanel.add(new JLabel("Players:"));
-        statusPanel.add(playersLabel);
-        statusPanel.add(new JLabel("Bots:"));
-        statusPanel.add(botsLabel);
-        statusPanel.add(new JLabel("Version:"));
-        statusPanel.add(versionLabel);
-        statusPanel.add(new JLabel("Update:"));
-        statusPanel.add(updateLabel);
+        JPanel statusInfoPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 16, 0));
+        statusInfoPanel.add(new JLabel("Status:"));
+        statusInfoPanel.add(statusLabel);
+        statusInfoPanel.add(new JLabel("Uptime:"));
+        statusInfoPanel.add(uptimeLabel);
+        statusInfoPanel.add(new JLabel("Players:"));
+        statusInfoPanel.add(playersLabel);
+        statusInfoPanel.add(new JLabel("Bots:"));
+        statusInfoPanel.add(botsLabel);
+        statusInfoPanel.add(new JLabel("Version:"));
+        statusInfoPanel.add(versionLabel);
+        statusInfoPanel.add(new JLabel("Update:"));
+        statusInfoPanel.add(updateLabel);
+
+        JPanel statusPanel = new JPanel(new BorderLayout(8, 0));
+        statusPanel.add(statusInfoPanel, BorderLayout.CENTER);
+        updateButton.setPreferredSize(new Dimension(150, 28));
+        statusPanel.add(updateButton, BorderLayout.EAST);
 
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
         buttons.add(startButton);
@@ -130,7 +135,6 @@ public final class ServerControl {
         JButton logsButton = new JButton("Open Logs");
         buttons.add(configButton);
         buttons.add(logsButton);
-        buttons.add(updateButton);
 
         JPanel top = new JPanel(new BorderLayout(0, 8));
         top.add(statusPanel, BorderLayout.NORTH);
