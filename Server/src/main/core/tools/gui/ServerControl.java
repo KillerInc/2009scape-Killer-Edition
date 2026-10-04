@@ -6,36 +6,57 @@ import java.awt.*;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.io.*;
+import java.net.HttpURLConnection;
 import java.net.URISyntaxException;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
+import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Locale;
+import java.util.Properties;
 
 public final class ServerControl {
+    private static final String UPDATE_MANIFEST_URL =
+            "https://github.com/KillerInc/2009scape-Killer-Edition/releases/latest/download/update-manifest.properties";
+
     private final JFrame frame = new JFrame("2009Scape Killer Edition - Server Control");
     private final JTextArea logArea = new JTextArea();
     private final JLabel statusLabel = new JLabel("Offline");
     private final JLabel uptimeLabel = new JLabel("00:00:00");
     private final JLabel playersLabel = new JLabel("0");
     private final JLabel botsLabel = new JLabel("0");
+    private final JLabel versionLabel = new JLabel("?");
+    private final JLabel updateLabel = new JLabel("Not checked");
+
     private final JSpinner minutesSpinner = new JSpinner(new SpinnerNumberModel(1, 0, 1440, 1));
     private final JSpinner secondsSpinner = new JSpinner(new SpinnerNumberModel(0, 0, 59, 1));
+
     private final JButton startButton = new JButton("Start Server");
     private final JButton restartButton = new JButton("Restart Server");
     private final JButton shutdownButton = new JButton("Safe Shutdown");
     private final JButton forceStopButton = new JButton("Force Stop");
     private final JButton cancelCountdownButton = new JButton("Cancel Countdown");
+    private final JButton checkUpdateButton = new JButton("Check for Updates");
+    private final JButton installUpdateButton = new JButton("Download & Install");
+
     private final JTextField commandField = new JTextField();
     private final JButton sendButton = new JButton("Send");
 
     private final Path serverDir;
     private final Path serverJar;
     private final Path javaExe;
+    private final Path installRoot;
 
     private volatile Process process;
     private volatile BufferedWriter serverInput;
     private volatile Instant startedAt;
+
+    private volatile Properties latestManifest;
+    private volatile String latestVersion;
+    private volatile Path stagedUpdateDir;
+    private volatile boolean installAfterServerExit;
 
     public static void main(String[] args) {
         SwingUtilities.invokeLater(() -> {
@@ -48,7 +69,8 @@ public final class ServerControl {
     }
 
     private ServerControl() throws URISyntaxException {
-        Path jarLocation = Paths.get(ServerControl.class.getProtectionDomain().getCodeSource().getLocation().toURI()).toAbsolutePath().normalize();
+        Path jarLocation = Paths.get(ServerControl.class.getProtectionDomain().getCodeSource().getLocation().toURI())
+                .toAbsolutePath().normalize();
 
         if (Files.isDirectory(jarLocation)) {
             serverDir = Paths.get("").toAbsolutePath().normalize();
@@ -58,18 +80,20 @@ public final class ServerControl {
             serverDir = jarLocation.getParent();
         }
 
-        String exe = System.getProperty("os.name", "").toLowerCase().contains("win") ? "java.exe" : "java";
+        installRoot = serverDir.getParent() == null ? serverDir : serverDir.getParent();
+
+        String exe = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win") ? "java.exe" : "java";
         javaExe = Paths.get(System.getProperty("java.home"), "bin", exe);
 
         buildUi();
         updateButtons();
-        startUptimeTimer();
+        startTimers();
     }
 
     private void buildUi() {
         frame.setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
-        frame.setMinimumSize(new Dimension(780, 520));
-        frame.setSize(1000, 700);
+        frame.setMinimumSize(new Dimension(900, 560));
+        frame.setSize(1120, 740);
         frame.setLocationRelativeTo(null);
 
         JPanel rootPanel = new JPanel(new BorderLayout(8, 8));
@@ -84,6 +108,10 @@ public final class ServerControl {
         statusPanel.add(playersLabel);
         statusPanel.add(new JLabel("Bots:"));
         statusPanel.add(botsLabel);
+        statusPanel.add(new JLabel("Version:"));
+        statusPanel.add(versionLabel);
+        statusPanel.add(new JLabel("Update:"));
+        statusPanel.add(updateLabel);
 
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
         buttons.add(startButton);
@@ -101,6 +129,8 @@ public final class ServerControl {
         JButton logsButton = new JButton("Open Logs");
         buttons.add(configButton);
         buttons.add(logsButton);
+        buttons.add(checkUpdateButton);
+        buttons.add(installUpdateButton);
 
         JPanel top = new JPanel(new BorderLayout(0, 8));
         top.add(statusPanel, BorderLayout.NORTH);
@@ -109,7 +139,6 @@ public final class ServerControl {
         logArea.setEditable(false);
         logArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
         logArea.setLineWrap(false);
-
         JScrollPane scroll = new JScrollPane(logArea);
 
         JPanel commandPanel = new JPanel(new BorderLayout(6, 0));
@@ -126,6 +155,7 @@ public final class ServerControl {
         restartButton.addActionListener(e -> restartServer());
         shutdownButton.addActionListener(e -> safeShutdown());
         forceStopButton.addActionListener(e -> forceStop());
+
         cancelCountdownButton.addActionListener(e -> {
             if (isRunning()) {
                 append("[GUI] Cancelling scheduled shutdown/restart...");
@@ -133,6 +163,10 @@ public final class ServerControl {
                 status("Running");
             }
         });
+
+        checkUpdateButton.addActionListener(e -> checkForUpdates(true));
+        installUpdateButton.addActionListener(e -> downloadAndInstallUpdate());
+
         sendButton.addActionListener(e -> sendTypedCommand());
         commandField.addActionListener(e -> sendTypedCommand());
 
@@ -144,19 +178,20 @@ public final class ServerControl {
             public void windowClosing(WindowEvent e) {
                 if (isRunning()) {
                     int result = JOptionPane.showConfirmDialog(
-                        frame,
-                        "The server is still running.\n\nUse Safe Shutdown before closing the controller?",
-                        "Server still running",
-                        JOptionPane.YES_NO_CANCEL_OPTION,
-                        JOptionPane.WARNING_MESSAGE
+                            frame,
+                            "The server is still running.\n\nUse Safe Shutdown before closing the controller?",
+                            "Server still running",
+                            JOptionPane.YES_NO_CANCEL_OPTION,
+                            JOptionPane.WARNING_MESSAGE
                     );
+
                     if (result == JOptionPane.YES_OPTION) {
                         safeShutdown();
                     } else if (result == JOptionPane.NO_OPTION) {
-                        frame.dispose();
+                        closeController();
                     }
                 } else {
-                    frame.dispose();
+                    closeController();
                 }
             }
         });
@@ -166,7 +201,10 @@ public final class ServerControl {
         append("[GUI] Killer Edition Server Control ready.");
         append("[GUI] Server JAR: " + serverJar);
         append("[GUI] Java: " + javaExe);
+        versionLabel.setText(readLocalVersion());
+        installUpdateButton.setEnabled(false);
         frame.setVisible(true);
+        checkForUpdates(false);
     }
 
     private synchronized void startServer() {
@@ -218,7 +256,9 @@ public final class ServerControl {
                     parseGuiStatus(line);
                     continue;
                 }
+
                 append(line);
+
                 if (line.contains(" started in ") && line.contains(" milliseconds.")) {
                     SwingUtilities.invokeLater(() -> status("Running"));
                 } else if (line.contains("Initializing termination sequence")) {
@@ -256,6 +296,7 @@ public final class ServerControl {
         int minutes = ((Number) minutesSpinner.getValue()).intValue();
         int seconds = ((Number) secondsSpinner.getValue()).intValue();
         int total = minutes * 60 + seconds;
+
         if (total < 15) {
             total = 15;
             minutesSpinner.setValue(0);
@@ -268,11 +309,11 @@ public final class ServerControl {
         if (!isRunning()) return;
 
         int result = JOptionPane.showConfirmDialog(
-            frame,
-            "Force Stop may interrupt saves.\nUse only if Safe Shutdown is not working.\n\nForce stop now?",
-            "Force Stop",
-            JOptionPane.YES_NO_OPTION,
-            JOptionPane.WARNING_MESSAGE
+                frame,
+                "Force Stop may interrupt saves.\nUse only if Safe Shutdown is not working.\n\nForce stop now?",
+                "Force Stop",
+                JOptionPane.YES_NO_OPTION,
+                JOptionPane.WARNING_MESSAGE
         );
 
         if (result == JOptionPane.YES_OPTION) {
@@ -293,13 +334,18 @@ public final class ServerControl {
         closeInput();
         startedAt = null;
 
-        boolean doRestart = code == 23;
         status("Offline");
         playersLabel.setText("0");
         botsLabel.setText("0");
         updateButtons();
 
-        if (doRestart) {
+        if (installAfterServerExit && stagedUpdateDir != null) {
+            installAfterServerExit = false;
+            launchUpdater();
+            return;
+        }
+
+        if (code == 23) {
             append("[GUI] Server requested restart. Starting again...");
             Timer timer = new Timer(1000, e -> startServer());
             timer.setRepeats(false);
@@ -347,14 +393,19 @@ public final class ServerControl {
         secondsSpinner.setEnabled(running);
         commandField.setEnabled(running);
         sendButton.setEnabled(running);
+
+        checkUpdateButton.setEnabled(true);
+        installUpdateButton.setEnabled(latestManifest != null
+                && latestVersion != null
+                && !latestVersion.equals(readLocalVersion()));
     }
 
     private void status(String value) {
         statusLabel.setText(value);
     }
 
-    private void startUptimeTimer() {
-        Timer timer = new Timer(1000, e -> {
+    private void startTimers() {
+        Timer uptimeTimer = new Timer(1000, e -> {
             Instant start = startedAt;
             if (start == null || !isRunning()) {
                 uptimeLabel.setText("00:00:00");
@@ -363,9 +414,12 @@ public final class ServerControl {
 
             Duration d = Duration.between(start, Instant.now());
             long seconds = d.getSeconds();
-            uptimeLabel.setText(String.format("%02d:%02d:%02d", seconds / 3600, (seconds % 3600) / 60, seconds % 60));
+            uptimeLabel.setText(String.format("%02d:%02d:%02d",
+                    seconds / 3600,
+                    (seconds % 3600) / 60,
+                    seconds % 60));
         });
-        timer.start();
+        uptimeTimer.start();
 
         Timer statusTimer = new Timer(5000, e -> {
             if (isRunning()) sendCommand("guistatus");
@@ -385,6 +439,263 @@ public final class ServerControl {
                 if ("bots".equals(kv[0])) botsLabel.setText(kv[1]);
             }
         } catch (Exception ignored) {
+        }
+    }
+
+    private String readLocalVersion() {
+        Path versionFile = installRoot.resolve("VERSION");
+        try {
+            if (Files.isRegularFile(versionFile)) {
+                return new String(Files.readAllBytes(versionFile), StandardCharsets.UTF_8).trim();
+            }
+        } catch (IOException ignored) {
+        }
+        return "unknown";
+    }
+
+    private void checkForUpdates(boolean interactive) {
+        checkUpdateButton.setEnabled(false);
+        updateLabel.setText("Checking...");
+
+        Thread t = new Thread(() -> {
+            try {
+                Properties manifest = new Properties();
+                try (InputStream in = openUrl(new URL(UPDATE_MANIFEST_URL))) {
+                    manifest.load(new InputStreamReader(in, StandardCharsets.UTF_8));
+                }
+
+                String version = requiredManifest(manifest, "version");
+                latestManifest = manifest;
+                latestVersion = version;
+
+                String local = readLocalVersion();
+
+                SwingUtilities.invokeLater(() -> {
+                    versionLabel.setText(local);
+
+                    if (version.equals(local)) {
+                        updateLabel.setText("Up to date");
+                        installUpdateButton.setEnabled(false);
+                        if (interactive) {
+                            JOptionPane.showMessageDialog(frame,
+                                    "Killer Edition " + local + " is up to date.",
+                                    "Updates",
+                                    JOptionPane.INFORMATION_MESSAGE);
+                        }
+                    } else {
+                        updateLabel.setText("v" + version + " available");
+                        installUpdateButton.setEnabled(true);
+                        if (interactive) {
+                            JOptionPane.showMessageDialog(frame,
+                                    "Killer Edition " + version + " is available.",
+                                    "Update Available",
+                                    JOptionPane.INFORMATION_MESSAGE);
+                        }
+                    }
+
+                    checkUpdateButton.setEnabled(true);
+                });
+            } catch (Exception ex) {
+                SwingUtilities.invokeLater(() -> {
+                    updateLabel.setText("Check failed");
+                    checkUpdateButton.setEnabled(true);
+                    if (interactive) error("Update check failed:\n" + ex.getMessage());
+                });
+            }
+        }, "update-check");
+
+        t.setDaemon(true);
+        t.start();
+    }
+
+    private void downloadAndInstallUpdate() {
+        Properties manifest = latestManifest;
+        String version = latestVersion;
+
+        if (manifest == null || version == null) {
+            checkForUpdates(true);
+            return;
+        }
+
+        int confirm = JOptionPane.showConfirmDialog(
+                frame,
+                "Download and install Killer Edition " + version + "?\n\n"
+                        + "Managed program files will be backed up first.\n"
+                        + "Player saves, worldprops, logs, and .runtime are never managed by the patcher.",
+                "Install Update",
+                JOptionPane.YES_NO_OPTION,
+                JOptionPane.QUESTION_MESSAGE
+        );
+
+        if (confirm != JOptionPane.YES_OPTION) return;
+
+        checkUpdateButton.setEnabled(false);
+        installUpdateButton.setEnabled(false);
+        updateLabel.setText("Downloading...");
+
+        Thread t = new Thread(() -> {
+            try {
+                Path updateRoot = installRoot.resolve(".update-stage").resolve(version);
+                if (Files.exists(updateRoot)) deleteTree(updateRoot);
+                Files.createDirectories(updateRoot);
+
+                int count = Integer.parseInt(manifest.getProperty("file.count", "0"));
+                if (count <= 0) throw new IOException("Update manifest has no files.");
+
+                for (int i = 0; i < count; i++) {
+                    String rel = requiredManifest(manifest, "file." + i + ".path");
+                    String fileUrl = requiredManifest(manifest, "file." + i + ".url");
+                    String expected = requiredManifest(manifest, "file." + i + ".sha256").toLowerCase(Locale.ROOT);
+
+                    Path destination = safeResolve(updateRoot, rel);
+                    if (destination.getParent() != null) Files.createDirectories(destination.getParent());
+
+                    append("[UPDATE] Downloading " + rel + "...");
+                    download(new URL(fileUrl), destination);
+
+                    String actual = sha256(destination);
+                    if (!actual.equals(expected)) {
+                        throw new IOException("SHA-256 mismatch for " + rel);
+                    }
+                }
+
+                String helperUrl = requiredManifest(manifest, "updater.url");
+                String helperSha = requiredManifest(manifest, "updater.sha256").toLowerCase(Locale.ROOT);
+                Path helper = updateRoot.resolve("KillerUpdater.jar");
+
+                append("[UPDATE] Downloading updater helper...");
+                download(new URL(helperUrl), helper);
+
+                if (!sha256(helper).equals(helperSha)) {
+                    throw new IOException("SHA-256 mismatch for updater helper.");
+                }
+
+                Path manifestCopy = updateRoot.resolve("update-manifest.properties");
+                try (Writer w = Files.newBufferedWriter(manifestCopy, StandardCharsets.UTF_8)) {
+                    manifest.store(w, "Killer Edition update manifest");
+                }
+
+                stagedUpdateDir = updateRoot;
+
+                SwingUtilities.invokeLater(() -> {
+                    updateLabel.setText("Ready to install");
+
+                    if (isRunning()) {
+                        int delay = selectedDelaySeconds();
+                        installAfterServerExit = true;
+                        append("[UPDATE] Update ready. Scheduling safe shutdown in " + delay + " seconds.");
+                        status("Update shutdown scheduled");
+                        sendCommand("shutdown " + delay);
+                    } else {
+                        launchUpdater();
+                    }
+                });
+            } catch (Exception ex) {
+                append("[UPDATE] Failed: " + ex);
+                SwingUtilities.invokeLater(() -> {
+                    updateLabel.setText("Download failed");
+                    checkUpdateButton.setEnabled(true);
+                    installUpdateButton.setEnabled(true);
+                    error("Update download failed:\n" + ex.getMessage());
+                });
+            }
+        }, "update-download");
+
+        t.setDaemon(true);
+        t.start();
+    }
+
+    private void launchUpdater() {
+        try {
+            if (stagedUpdateDir == null || latestVersion == null) {
+                throw new IOException("No staged update.");
+            }
+
+            Path helper = stagedUpdateDir.resolve("KillerUpdater.jar");
+            Path manifest = stagedUpdateDir.resolve("update-manifest.properties");
+            long pid = ProcessHandle.current().pid();
+
+            ProcessBuilder pb = new ProcessBuilder(
+                    javaExe.toString(),
+                    "-jar", helper.toString(),
+                    "--root", installRoot.toString(),
+                    "--stage", stagedUpdateDir.toString(),
+                    "--manifest", manifest.toString(),
+                    "--version", latestVersion,
+                    "--wait-pid", Long.toString(pid)
+            );
+            pb.directory(installRoot.toFile());
+            pb.start();
+
+            append("[UPDATE] Updater launched. Closing GUI so files can be replaced.");
+            closeController();
+        } catch (Exception ex) {
+            error("Could not launch updater:\n" + ex.getMessage());
+        }
+    }
+
+    private static InputStream openUrl(URL url) throws IOException {
+        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+        conn.setConnectTimeout(15000);
+        conn.setReadTimeout(30000);
+        conn.setInstanceFollowRedirects(true);
+        conn.setRequestProperty("User-Agent", "2009Scape-Killer-Edition-Updater");
+        int code = conn.getResponseCode();
+
+        if (code < 200 || code >= 300) {
+            throw new IOException("HTTP " + code + " from " + url);
+        }
+        return conn.getInputStream();
+    }
+
+    private static void download(URL url, Path destination) throws IOException {
+        Path temp = destination.resolveSibling(destination.getFileName().toString() + ".part");
+        try (InputStream in = openUrl(url);
+             OutputStream out = Files.newOutputStream(temp, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
+            byte[] buffer = new byte[1024 * 1024];
+            int n;
+            while ((n = in.read(buffer)) > 0) out.write(buffer, 0, n);
+        }
+        Files.move(temp, destination, StandardCopyOption.REPLACE_EXISTING);
+    }
+
+    private static String sha256(Path file) throws Exception {
+        MessageDigest md = MessageDigest.getInstance("SHA-256");
+        try (InputStream in = Files.newInputStream(file)) {
+            byte[] buf = new byte[1024 * 1024];
+            int n;
+            while ((n = in.read(buf)) > 0) md.update(buf, 0, n);
+        }
+
+        StringBuilder sb = new StringBuilder();
+        for (byte b : md.digest()) sb.append(String.format("%02x", b));
+        return sb.toString();
+    }
+
+    private static String requiredManifest(Properties p, String key) throws IOException {
+        String v = p.getProperty(key);
+        if (v == null || v.trim().isEmpty()) throw new IOException("Manifest missing " + key);
+        return v.trim();
+    }
+
+    private static Path safeResolve(Path base, String relative) throws IOException {
+        Path p = base.resolve(relative.replace('/', File.separatorChar)).normalize();
+        if (!p.startsWith(base)) throw new IOException("Unsafe update path: " + relative);
+        return p;
+    }
+
+    private static void deleteTree(Path root) throws IOException {
+        if (!Files.exists(root)) return;
+        try (java.util.stream.Stream<Path> paths = Files.walk(root)) {
+            paths.sorted((a, b) -> b.compareTo(a)).forEach(p -> {
+                try {
+                    Files.deleteIfExists(p);
+                } catch (IOException ex) {
+                    throw new UncheckedIOException(ex);
+                }
+            });
+        } catch (UncheckedIOException ex) {
+            throw ex.getCause();
         }
     }
 
@@ -414,5 +725,10 @@ public final class ServerControl {
         } catch (IOException ignored) {
         }
         serverInput = null;
+    }
+
+    private void closeController() {
+        frame.dispose();
+        System.exit(0);
     }
 }
