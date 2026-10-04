@@ -41,6 +41,7 @@ public final class ServerControl {
     private final JButton forceStopButton = new JButton("Force Stop");
     private final JButton cancelCountdownButton = new JButton("Cancel Countdown");
     private final JButton updateButton = new JButton("Update");
+    private final JButton checkVersionButton = new JButton("Check Version");
 
     private final JTextField commandField = new JTextField();
     private final JButton sendButton = new JButton("Send");
@@ -116,8 +117,12 @@ public final class ServerControl {
 
         JPanel statusPanel = new JPanel(new BorderLayout(8, 0));
         statusPanel.add(statusInfoPanel, BorderLayout.CENTER);
+        JPanel updatePanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
+        checkVersionButton.setPreferredSize(new Dimension(120, 28));
         updateButton.setPreferredSize(new Dimension(150, 28));
-        statusPanel.add(updateButton, BorderLayout.EAST);
+        updatePanel.add(checkVersionButton);
+        updatePanel.add(updateButton);
+        statusPanel.add(updatePanel, BorderLayout.EAST);
 
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
         buttons.add(startButton);
@@ -168,6 +173,7 @@ public final class ServerControl {
             }
         });
 
+        checkVersionButton.addActionListener(e -> checkForUpdates(true));
         updateButton.addActionListener(e -> handleUpdateButton());
 
         sendButton.addActionListener(e -> sendTypedCommand());
@@ -396,6 +402,7 @@ public final class ServerControl {
         commandField.setEnabled(running);
         sendButton.setEnabled(running);
 
+        checkVersionButton.setEnabled(true);
         updateButton.setEnabled(true);
         boolean patchRequired = false;
         if (latestManifest != null && latestVersion != null) {
@@ -465,6 +472,7 @@ public final class ServerControl {
     }
 
     private void checkForUpdates(boolean interactive) {
+        checkVersionButton.setEnabled(false);
         updateButton.setEnabled(false);
         updateLabel.setText("Checking...");
 
@@ -505,11 +513,13 @@ public final class ServerControl {
                         }
                     }
 
+                    checkVersionButton.setEnabled(true);
                     updateButton.setEnabled(true);
                 });
             } catch (Exception ex) {
                 SwingUtilities.invokeLater(() -> {
                     updateLabel.setText("Check failed");
+                    checkVersionButton.setEnabled(true);
                     updateButton.setEnabled(true);
                     updateButton.setText("Update");
                     if (interactive) error("Update check failed:\n" + ex.getMessage());
