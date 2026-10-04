@@ -2,10 +2,6 @@ name: Build Killer Edition Release
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - "VERSION"
-      - ".github/workflows/release.yml"
 
 permissions:
   contents: write
