@@ -25,8 +25,17 @@ if not exist "%SERVER_JAR%" (
 )
 
 cd /d "%~dp0Server"
+
+:run
 "%JAVA_EXE%" -jar "server.jar" %*
 set "ERR=%ERRORLEVEL%"
+
+if "%ERR%"=="23" (
+    echo.
+    echo Server requested restart. Starting again...
+    timeout /t 1 /nobreak >nul
+    goto :run
+)
 
 echo.
 echo Server exited with code %ERR%.
