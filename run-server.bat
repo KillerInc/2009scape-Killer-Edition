@@ -1,14 +1,4 @@
 @echo off
-cd Server
-
-if NOT exist hasRan.txt (
-    .\mvnw.cmd clean
-    copy NUL hasRan.txt
-    .\mvnw.cmd package -DskipTests
-    xcopy /Y target\*-with-dependencies.jar server.jar*
-    java -jar server.jar
-) ELSE (
-    .\mvnw.cmd package -DskipTests
-    xcopy /Y target\*-with-dependencies.jar server.jar*
-    java -jar server.jar
-)
+rem Compatibility launcher. The simplified launcher is now server.bat.
+call "%~dp0server.bat" %*
+exit /b %ERRORLEVEL%
