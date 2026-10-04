@@ -426,6 +426,10 @@ public final class ServerControl {
         });
         statusTimer.setInitialDelay(5000);
         statusTimer.start();
+
+        Timer updateCheckTimer = new Timer(30 * 60 * 1000, e -> checkForUpdates(false));
+        updateCheckTimer.setInitialDelay(30 * 60 * 1000);
+        updateCheckTimer.start();
     }
 
     private void parseGuiStatus(String line) {
@@ -469,16 +473,17 @@ public final class ServerControl {
                 latestVersion = version;
 
                 String local = readLocalVersion();
+                boolean patchRequired = hasPendingComponentChanges(manifest);
 
                 SwingUtilities.invokeLater(() -> {
                     versionLabel.setText(local);
 
-                    if (version.equals(local)) {
+                    if (!patchRequired) {
                         updateLabel.setText("Up to date");
                         updateButton.setText("Update");
                         if (interactive) {
                             JOptionPane.showMessageDialog(frame,
-                                    "Killer Edition " + local + " is up to date.",
+                                    "No patch required.\nKiller Edition " + local + " is already up to date.",
                                     "Updates",
                                     JOptionPane.INFORMATION_MESSAGE);
                         }
@@ -510,11 +515,59 @@ public final class ServerControl {
     }
 
     private void handleUpdateButton() {
-        if (latestManifest != null && latestVersion != null && !latestVersion.equals(readLocalVersion())) {
-            downloadAndInstallUpdate();
-        } else {
-            checkForUpdates(true);
+        if (latestManifest != null) {
+            try {
+                if (hasPendingComponentChanges(latestManifest)) {
+                    downloadAndInstallUpdate();
+                    return;
+                }
+            } catch (Exception ignored) {
+            }
         }
+        checkForUpdates(true);
+    }
+
+    private boolean hasPendingComponentChanges(Properties manifest) throws IOException {
+        Properties installed = loadInstalledComponents();
+        int count = Integer.parseInt(manifest.getProperty("component.count", "0"));
+        if (count <= 0) {
+            return !requiredManifest(manifest, "version").equals(readLocalVersion());
+        }
+
+        for (int i = 0; i < count; i++) {
+            String name = requiredManifest(manifest, "component." + i + ".name");
+            String remoteHash = requiredManifest(manifest, "component." + i + ".sha256");
+            String installedHash = componentHash(installed, name);
+            if (!remoteHash.equalsIgnoreCase(installedHash)) return true;
+        }
+        return false;
+    }
+
+    private Properties loadInstalledComponents() {
+        Properties installed = new Properties();
+        Path localManifest = installRoot.resolve(".killer-components.properties");
+        if (!Files.isRegularFile(localManifest)) return installed;
+        try (Reader r = Files.newBufferedReader(localManifest, StandardCharsets.UTF_8)) {
+            installed.load(r);
+        } catch (IOException ignored) {
+        }
+        return installed;
+    }
+
+    private static String componentHash(Properties p, String componentName) {
+        int count;
+        try {
+            count = Integer.parseInt(p.getProperty("component.count", "0"));
+        } catch (NumberFormatException ex) {
+            return "";
+        }
+
+        for (int i = 0; i < count; i++) {
+            if (componentName.equalsIgnoreCase(p.getProperty("component." + i + ".name", ""))) {
+                return p.getProperty("component." + i + ".sha256", "");
+            }
+        }
+        return "";
     }
 
     private void downloadAndInstallUpdate() {
@@ -529,8 +582,8 @@ public final class ServerControl {
         int confirm = JOptionPane.showConfirmDialog(
                 frame,
                 "Download and install Killer Edition " + version + "?\n\n"
-                        + "Managed program files will be backed up first.\n"
-                        + "Player saves, worldprops, logs, and .runtime are never managed by the patcher.",
+                        + "Only changed runtime component archives will be downloaded.\n"
+                        + "Player saves, worldprops, logs, and .runtime are never replaced.",
                 "Install Update",
                 JOptionPane.YES_NO_OPTION,
                 JOptionPane.QUESTION_MESSAGE
@@ -545,51 +598,63 @@ public final class ServerControl {
             try {
                 Path updateRoot = installRoot.resolve(".update-stage").resolve(version);
                 if (Files.exists(updateRoot)) deleteTree(updateRoot);
-                Files.createDirectories(updateRoot);
+                Path packageDir = updateRoot.resolve("packages");
+                Files.createDirectories(packageDir);
 
-                String packageUrl = requiredManifest(manifest, "package.url");
-                String packageSha = requiredManifest(manifest, "package.sha256").toLowerCase(Locale.ROOT);
-                Path packageZip = updateRoot.resolve("update-package.zip");
+                Properties installed = loadInstalledComponents();
+                int count = Integer.parseInt(manifest.getProperty("component.count", "0"));
+                if (count <= 0) throw new IOException("Update manifest contains no components.");
 
-                append("[UPDATE] Downloading compact update package...");
-                download(new URL(packageUrl), packageZip);
-
-                if (!sha256(packageZip).equals(packageSha)) {
-                    throw new IOException("SHA-256 mismatch for update package.");
-                }
-
-                append("[UPDATE] Extracting update package...");
-                extractZip(packageZip, updateRoot);
-                Files.deleteIfExists(packageZip);
-
-                int count = Integer.parseInt(manifest.getProperty("file.count", "0"));
-                if (count <= 0) throw new IOException("Update manifest has no files.");
-
+                int downloads = 0;
                 for (int i = 0; i < count; i++) {
-                    String rel = requiredManifest(manifest, "file." + i + ".path");
-                    String expected = requiredManifest(manifest, "file." + i + ".sha256").toLowerCase(Locale.ROOT);
-                    Path staged = safeResolve(updateRoot, rel);
+                    String name = requiredManifest(manifest, "component." + i + ".name");
+                    String rel = requiredManifest(manifest, "component." + i + ".file");
+                    String expected = requiredManifest(manifest, "component." + i + ".sha256").toLowerCase(Locale.ROOT);
+                    String url = requiredManifest(manifest, "component." + i + ".url");
 
-                    if (!Files.isRegularFile(staged)) {
-                        throw new IOException("Update package is missing " + rel);
+                    String currentHash = componentHash(installed, name);
+                    if (expected.equalsIgnoreCase(currentHash)) {
+                        append("[UPDATE] " + name + " unchanged - skipping.");
+                        continue;
                     }
-                    if (!sha256(staged).equals(expected)) {
-                        throw new IOException("SHA-256 mismatch for " + rel);
+
+                    Path destination = safeResolve(updateRoot, rel);
+                    if (destination.getParent() != null) Files.createDirectories(destination.getParent());
+
+                    append("[UPDATE] Downloading " + name + "...");
+                    download(new URL(url), destination);
+
+                    if (!sha256(destination).equals(expected)) {
+                        throw new IOException("SHA-256 mismatch for " + name + ".");
                     }
+                    downloads++;
                 }
 
-                String helperRel = requiredManifest(manifest, "updater.path");
-                String helperSha = requiredManifest(manifest, "updater.sha256").toLowerCase(Locale.ROOT);
-                Path helper = safeResolve(updateRoot, helperRel);
-
-                if (!Files.isRegularFile(helper) || !sha256(helper).equals(helperSha)) {
-                    throw new IOException("SHA-256 mismatch for updater helper.");
+                if (downloads == 0) {
+                    SwingUtilities.invokeLater(() -> {
+                        updateLabel.setText("Up to date");
+                        updateButton.setText("Update");
+                        updateButton.setEnabled(true);
+                        JOptionPane.showMessageDialog(frame,
+                                "No patch required.\nThis installation already matches the latest component hashes.",
+                                "Updates",
+                                JOptionPane.INFORMATION_MESSAGE);
+                    });
+                    return;
                 }
 
                 Path manifestCopy = updateRoot.resolve("update-manifest.properties");
                 try (Writer w = Files.newBufferedWriter(manifestCopy, StandardCharsets.UTF_8)) {
-                    manifest.store(w, "Killer Edition update manifest");
+                    manifest.store(w, "Killer Edition component manifest");
                 }
+
+                Path installedHelper = installRoot.resolve("Tools").resolve("Updater").resolve("KillerUpdater.jar");
+                if (!Files.isRegularFile(installedHelper)) {
+                    throw new IOException("Installed updater helper is missing: " + installedHelper);
+                }
+
+                Path runningHelper = updateRoot.resolve("KillerUpdater-running.jar");
+                Files.copy(installedHelper, runningHelper, StandardCopyOption.REPLACE_EXISTING);
 
                 stagedUpdateDir = updateRoot;
 
@@ -626,7 +691,7 @@ public final class ServerControl {
                 throw new IOException("No staged update.");
             }
 
-            Path helper = safeResolve(stagedUpdateDir, requiredManifest(latestManifest, "updater.path"));
+            Path helper = stagedUpdateDir.resolve("KillerUpdater-running.jar");
             Path manifest = stagedUpdateDir.resolve("update-manifest.properties");
             long pid = ProcessHandle.current().pid();
 
