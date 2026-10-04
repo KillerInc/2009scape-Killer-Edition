@@ -101,36 +101,50 @@ jobs:
           echo "path=$RUNNER_TEMP/$NAME" >> "$GITHUB_OUTPUT"
 
           MANIFEST="$RUNNER_TEMP/update-manifest.properties"
+          UPDATE_NAME="2009scape-Killer-Edition_Update_v$VERSION.zip"
+          UPDATE_STAGE="$RUNNER_TEMP/update-package"
+          UPDATE_ZIP="$RUNNER_TEMP/$UPDATE_NAME"
           BASE_URL="https://github.com/KillerInc/2009scape-Killer-Edition/releases/download/$TAG"
 
           sha256_file() {
             sha256sum "$1" | awk '{print $1}'
           }
 
+          rm -rf "$UPDATE_STAGE"
+          mkdir -p "$UPDATE_STAGE/Server" "$UPDATE_STAGE/Tools/Updater"
+          cp "$GITHUB_WORKSPACE/Server/server.jar" "$UPDATE_STAGE/Server/server.jar"
+          cp "$GITHUB_WORKSPACE/server-gui.bat" "$UPDATE_STAGE/server-gui.bat"
+          cp "$GITHUB_WORKSPACE/server.bat" "$UPDATE_STAGE/server.bat"
+          cp "$GITHUB_WORKSPACE/setup.bat" "$UPDATE_STAGE/setup.bat"
+          cp "$GITHUB_WORKSPACE/VERSION" "$UPDATE_STAGE/VERSION"
+          cp "$GITHUB_WORKSPACE/Tools/Updater/KillerUpdater.jar" "$UPDATE_STAGE/Tools/Updater/KillerUpdater.jar"
+
+          cd "$UPDATE_STAGE"
+          7z a -tzip -mx=1 -mmt=on "$UPDATE_ZIP" . >/dev/null
+          cd "$GITHUB_WORKSPACE"
+
           {
             echo "version=$VERSION"
             echo "file.count=5"
             echo "file.0.path=Server/server.jar"
             echo "file.0.sha256=$(sha256_file "$GITHUB_WORKSPACE/Server/server.jar")"
-            echo "file.0.url=$BASE_URL/server.jar"
             echo "file.1.path=server-gui.bat"
             echo "file.1.sha256=$(sha256_file "$GITHUB_WORKSPACE/server-gui.bat")"
-            echo "file.1.url=$BASE_URL/server-gui.bat"
             echo "file.2.path=server.bat"
             echo "file.2.sha256=$(sha256_file "$GITHUB_WORKSPACE/server.bat")"
-            echo "file.2.url=$BASE_URL/server.bat"
             echo "file.3.path=setup.bat"
             echo "file.3.sha256=$(sha256_file "$GITHUB_WORKSPACE/setup.bat")"
-            echo "file.3.url=$BASE_URL/setup.bat"
             echo "file.4.path=VERSION"
             echo "file.4.sha256=$(sha256_file "$GITHUB_WORKSPACE/VERSION")"
-            echo "file.4.url=$BASE_URL/VERSION"
+            echo "updater.path=Tools/Updater/KillerUpdater.jar"
             echo "updater.sha256=$(sha256_file "$GITHUB_WORKSPACE/Tools/Updater/KillerUpdater.jar")"
-            echo "updater.url=$BASE_URL/KillerUpdater.jar"
+            echo "package.url=$BASE_URL/$UPDATE_NAME"
+            echo "package.sha256=$(sha256_file "$UPDATE_ZIP")"
           } > "$MANIFEST"
 
           echo "manifest=$MANIFEST" >> "$GITHUB_OUTPUT"
-          echo "updater=$GITHUB_WORKSPACE/Tools/Updater/KillerUpdater.jar" >> "$GITHUB_OUTPUT"
+          echo "update_zip=$UPDATE_ZIP" >> "$GITHUB_OUTPUT"
+          echo "update_name=$UPDATE_NAME" >> "$GITHUB_OUTPUT"
 
       - name: Create or update GitHub Release
         env:
@@ -140,7 +154,8 @@ jobs:
           ZIP_PATH: ${{ steps.package.outputs.path }}
           ZIP_NAME: ${{ steps.package.outputs.name }}
           MANIFEST_PATH: ${{ steps.package.outputs.manifest }}
-          UPDATER_PATH: ${{ steps.package.outputs.updater }}
+          UPDATE_ZIP: ${{ steps.package.outputs.update_zip }}
+          UPDATE_NAME: ${{ steps.package.outputs.update_name }}
         shell: bash
         run: |
           set -euo pipefail
@@ -155,7 +170,7 @@ jobs:
           4. Run server-gui.bat for the graphical server controller, or server.bat for console-only mode.
 
           This package includes the materialized RuneScape cache and a prebuilt server.jar with the lightweight Server Control GUI and self-patcher built in.
-          Existing Killer Edition installs can update from the Server Control GUI without downloading the full ZIP.
+          Existing Killer Edition installs can update from the Server Control GUI using the compact $UPDATE_NAME patch package.
           Git and Git LFS are not required when using this release ZIP.
           setup.bat downloads a private Temurin JDK 11 runtime into .runtime and does not change system Java.
           EOF
@@ -164,12 +179,7 @@ jobs:
           ASSETS=(
             "$ZIP_PATH"
             "$MANIFEST_PATH"
-            "$UPDATER_PATH"
-            "Server/server.jar"
-            "server-gui.bat"
-            "server.bat"
-            "setup.bat"
-            "VERSION"
+            "$UPDATE_ZIP"
           )
 
           if gh release view "$TAG" >/dev/null 2>&1; then
