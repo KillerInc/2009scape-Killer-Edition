@@ -38,8 +38,7 @@ public final class ServerControl {
     private final JButton shutdownButton = new JButton("Safe Shutdown");
     private final JButton forceStopButton = new JButton("Force Stop");
     private final JButton cancelCountdownButton = new JButton("Cancel Countdown");
-    private final JButton checkUpdateButton = new JButton("Check for Updates");
-    private final JButton installUpdateButton = new JButton("Download & Install");
+    private final JButton updateButton = new JButton("Update");
 
     private final JTextField commandField = new JTextField();
     private final JButton sendButton = new JButton("Send");
@@ -129,8 +128,7 @@ public final class ServerControl {
         JButton logsButton = new JButton("Open Logs");
         buttons.add(configButton);
         buttons.add(logsButton);
-        buttons.add(checkUpdateButton);
-        buttons.add(installUpdateButton);
+        buttons.add(updateButton);
 
         JPanel top = new JPanel(new BorderLayout(0, 8));
         top.add(statusPanel, BorderLayout.NORTH);
@@ -164,8 +162,7 @@ public final class ServerControl {
             }
         });
 
-        checkUpdateButton.addActionListener(e -> checkForUpdates(true));
-        installUpdateButton.addActionListener(e -> downloadAndInstallUpdate());
+        updateButton.addActionListener(e -> handleUpdateButton());
 
         sendButton.addActionListener(e -> sendTypedCommand());
         commandField.addActionListener(e -> sendTypedCommand());
@@ -202,7 +199,6 @@ public final class ServerControl {
         append("[GUI] Server JAR: " + serverJar);
         append("[GUI] Java: " + javaExe);
         versionLabel.setText(readLocalVersion());
-        installUpdateButton.setEnabled(false);
         frame.setVisible(true);
         checkForUpdates(false);
     }
@@ -394,10 +390,12 @@ public final class ServerControl {
         commandField.setEnabled(running);
         sendButton.setEnabled(running);
 
-        checkUpdateButton.setEnabled(true);
-        installUpdateButton.setEnabled(latestManifest != null
-                && latestVersion != null
-                && !latestVersion.equals(readLocalVersion()));
+        updateButton.setEnabled(true);
+        if (latestManifest != null && latestVersion != null && !latestVersion.equals(readLocalVersion())) {
+            updateButton.setText("Update to v" + latestVersion);
+        } else {
+            updateButton.setText("Update");
+        }
     }
 
     private void status(String value) {
@@ -454,7 +452,7 @@ public final class ServerControl {
     }
 
     private void checkForUpdates(boolean interactive) {
-        checkUpdateButton.setEnabled(false);
+        updateButton.setEnabled(false);
         updateLabel.setText("Checking...");
 
         Thread t = new Thread(() -> {
@@ -475,7 +473,7 @@ public final class ServerControl {
 
                     if (version.equals(local)) {
                         updateLabel.setText("Up to date");
-                        installUpdateButton.setEnabled(false);
+                        updateButton.setText("Update");
                         if (interactive) {
                             JOptionPane.showMessageDialog(frame,
                                     "Killer Edition " + local + " is up to date.",
@@ -484,7 +482,7 @@ public final class ServerControl {
                         }
                     } else {
                         updateLabel.setText("v" + version + " available");
-                        installUpdateButton.setEnabled(true);
+                        updateButton.setText("Update to v" + version);
                         if (interactive) {
                             JOptionPane.showMessageDialog(frame,
                                     "Killer Edition " + version + " is available.",
@@ -493,12 +491,13 @@ public final class ServerControl {
                         }
                     }
 
-                    checkUpdateButton.setEnabled(true);
+                    updateButton.setEnabled(true);
                 });
             } catch (Exception ex) {
                 SwingUtilities.invokeLater(() -> {
                     updateLabel.setText("Check failed");
-                    checkUpdateButton.setEnabled(true);
+                    updateButton.setEnabled(true);
+                    updateButton.setText("Update");
                     if (interactive) error("Update check failed:\n" + ex.getMessage());
                 });
             }
@@ -506,6 +505,14 @@ public final class ServerControl {
 
         t.setDaemon(true);
         t.start();
+    }
+
+    private void handleUpdateButton() {
+        if (latestManifest != null && latestVersion != null && !latestVersion.equals(readLocalVersion())) {
+            downloadAndInstallUpdate();
+        } else {
+            checkForUpdates(true);
+        }
     }
 
     private void downloadAndInstallUpdate() {
@@ -529,8 +536,7 @@ public final class ServerControl {
 
         if (confirm != JOptionPane.YES_OPTION) return;
 
-        checkUpdateButton.setEnabled(false);
-        installUpdateButton.setEnabled(false);
+        updateButton.setEnabled(false);
         updateLabel.setText("Downloading...");
 
         Thread t = new Thread(() -> {
@@ -606,8 +612,7 @@ public final class ServerControl {
                 append("[UPDATE] Failed: " + ex);
                 SwingUtilities.invokeLater(() -> {
                     updateLabel.setText("Download failed");
-                    checkUpdateButton.setEnabled(true);
-                    installUpdateButton.setEnabled(true);
+                    updateButton.setEnabled(true);
                     error("Update download failed:\n" + ex.getMessage());
                 });
             }
