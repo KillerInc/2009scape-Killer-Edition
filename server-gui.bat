@@ -2,8 +2,9 @@
 setlocal
 cd /d "%~dp0"
 
-set "JAVA_EXE=%~dp0.runtime\jdk-11\bin\java.exe"
-set "GUI_JAR=%~dp0Tools\ServerControl\ServerControl.jar"
+set "JAVA_HOME=%~dp0.runtime\jdk-11"
+set "JAVA_EXE=%JAVA_HOME%\bin\java.exe"
+set "SERVER_JAR=%~dp0Server\server.jar"
 
 if not exist "%JAVA_EXE%" (
     echo.
@@ -14,14 +15,15 @@ if not exist "%JAVA_EXE%" (
     exit /b 1
 )
 
-if not exist "%GUI_JAR%" (
+if not exist "%SERVER_JAR%" (
     echo.
-    echo ServerControl.jar is missing.
+    echo The server has not been built yet.
     echo Run setup.bat first.
     echo.
     pause
     exit /b 1
 )
 
-start "" "%JAVA_EXE%" -jar "%GUI_JAR%"
+cd /d "%~dp0Server"
+start "" "%JAVA_EXE%" -jar "server.jar" --gui
 exit /b 0
