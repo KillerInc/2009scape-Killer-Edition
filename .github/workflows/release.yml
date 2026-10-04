@@ -1,0 +1,118 @@
+name: Build Killer Edition Release
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "VERSION"
+      - ".github/workflows/release.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository with LFS content
+        uses: actions/checkout@v5
+        with:
+          lfs: true
+          fetch-depth: 0
+
+      - name: Verify LFS files are materialized
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f Server/data/cache/main_file_cache.dat2
+          if head -n 1 Server/data/cache/main_file_cache.dat2 | grep -q 'version https://git-lfs.github.com/spec/v1'; then
+            echo "Cache is still an LFS pointer."
+            exit 1
+          fi
+
+      - name: Set up Java 11 for upstream build
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '11'
+
+      - name: Build server JAR
+        working-directory: Server
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x mvnw
+          ./mvnw clean package -DskipTests
+          JAR="$(ls -1t target/*-jar-with-dependencies.jar | head -1)"
+          cp "$JAR" server.jar
+          test -s server.jar
+
+      - name: Build release ZIP
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERSION="$(tr -d '\r\n ' < VERSION)"
+          TAG="v$VERSION"
+          NAME="2009scape-Killer-Edition_v$VERSION.zip"
+          STAGE="$RUNNER_TEMP/2009scape-Killer-Edition"
+
+          rm -rf "$STAGE"
+          mkdir -p "$STAGE"
+
+          rsync -a ./ "$STAGE/" \
+            --exclude='.git/' \
+            --exclude='.github/' \
+            --exclude='.runtime/' \
+            --exclude='Server/target/' \
+            --exclude='Server/hasRan.txt'
+
+          test -s "$STAGE/Server/server.jar"
+          test -s "$STAGE/Server/data/cache/main_file_cache.dat2"
+
+          cd "$RUNNER_TEMP"
+          zip -q -r "$NAME" "2009scape-Killer-Edition"
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "path=$RUNNER_TEMP/$NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.package.outputs.tag }}
+          VERSION: ${{ steps.package.outputs.version }}
+          ZIP_PATH: ${{ steps.package.outputs.path }}
+          ZIP_NAME: ${{ steps.package.outputs.name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          NOTES="$(cat <<EOF
+          2009Scape Killer Edition $TAG
+
+          Windows quick start:
+          1. Download $ZIP_NAME
+          2. Extract it
+          3. Run setup.bat once
+          4. Run server.bat
+
+          This package includes the materialized RuneScape cache and a prebuilt server.jar.
+          Git and Git LFS are not required when using this release ZIP.
+          setup.bat downloads a private Temurin JDK 11 runtime into .runtime and does not change system Java.
+          EOF
+          )"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$ZIP_PATH" --clobber
+            gh release edit "$TAG" \
+              --title "2009Scape Killer Edition $TAG" \
+              --notes "$NOTES"
+          else
+            gh release create "$TAG" "$ZIP_PATH" \
+              --target "${GITHUB_SHA}" \
+              --title "2009Scape Killer Edition $TAG" \
+              --notes "$NOTES"
+          fi
