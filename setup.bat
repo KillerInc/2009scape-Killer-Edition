@@ -13,7 +13,7 @@ set "ERR=%ERRORLEVEL%"
 echo.
 if not "%ERR%"=="0" (
     echo Setup failed. See the error above.
-    pause
+    if not defined CI if not defined CI pause
     exit /b %ERR%
 )
 
