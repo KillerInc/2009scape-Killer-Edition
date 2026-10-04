@@ -230,7 +230,8 @@ class SystemCommandSet : CommandSet(Privilege.ADMIN) {
             player.inventory.add(Item(Items.ROTTEN_POTATO_5733))
         }
 
-        define("shutdown", Privilege.ADMIN, description = "Immediately terminates the server process. Do NOT test on a remote server you don't own.") { player, _ ->
+        define("shutdown", Privilege.ADMIN, description = "Safely saves and terminates the server process.") { player, _ ->
+            SystemManager.flag(SystemState.TERMINATED)
             exitProcess(0)
         }
 
