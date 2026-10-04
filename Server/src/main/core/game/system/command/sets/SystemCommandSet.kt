@@ -230,9 +230,14 @@ class SystemCommandSet : CommandSet(Privilege.ADMIN) {
             player.inventory.add(Item(Items.ROTTEN_POTATO_5733))
         }
 
-        define("shutdown", Privilege.ADMIN, description = "Safely saves and terminates the server process.") { player, _ ->
-            SystemManager.flag(SystemState.TERMINATED)
-            exitProcess(0)
+        define("shutdown", Privilege.ADMIN, usage = "::shutdown [seconds]", description = "Safely shuts down the server with a minimum 15-second warning.") { _, args ->
+            val seconds = args.getOrNull(1)?.toIntOrNull() ?: ServerShutdownScheduler.MINIMUM_SECONDS
+            ServerShutdownScheduler.schedule(ServerShutdownScheduler.Action.SHUTDOWN, seconds)
+        }
+
+        define("restart", Privilege.ADMIN, usage = "::restart [seconds]", description = "Safely restarts the server with a minimum 15-second warning.") { _, args ->
+            val seconds = args.getOrNull(1)?.toIntOrNull() ?: ServerShutdownScheduler.MINIMUM_SECONDS
+            ServerShutdownScheduler.schedule(ServerShutdownScheduler.Action.RESTART, seconds)
         }
 
         /**
