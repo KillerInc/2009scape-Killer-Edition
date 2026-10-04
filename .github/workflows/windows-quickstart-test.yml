@@ -6,6 +6,9 @@ on:
     paths:
       - "setup.bat"
       - "server.bat"
+      - "server-gui.bat"
+      - "Server/src/main/**"
+      - "Server/pom.xml"
       - "run-server.bat"
       - "Tools/setup-windows.ps1"
       - ".github/workflows/windows-quickstart-test.yml"
@@ -29,3 +32,5 @@ jobs:
           if (-not (Test-Path ".runtime\jdk-11\bin\java.exe")) { throw "Private JDK missing" }
           if (-not (Test-Path "Server\server.jar")) { throw "Server JAR missing" }
           & ".runtime\jdk-11\bin\java.exe" -version
+          $jarEntries = & ".runtime\jdk-11\bin\jar.exe" tf "Server\server.jar"
+          if ($jarEntries -notcontains "core/tools/gui/ServerControl.class") { throw "Integrated ServerControl.class missing from server.jar" }
