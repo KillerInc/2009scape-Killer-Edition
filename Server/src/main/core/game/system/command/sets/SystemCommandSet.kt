@@ -6,6 +6,7 @@ import core.cache.def.impl.ItemDefinition
 import core.game.node.entity.player.Player
 import core.game.node.item.Item
 import core.game.system.SystemManager
+import core.game.system.ServerShutdownScheduler
 import core.game.system.SystemState
 import core.game.system.command.Privilege
 import core.game.world.GameWorld
