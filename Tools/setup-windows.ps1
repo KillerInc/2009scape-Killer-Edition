@@ -18,38 +18,45 @@ function Fail([string]$Message) {
 
 Set-Location $Root
 
-Write-Step "Checking Git and Git LFS"
-if (-not (Get-Command git.exe -ErrorAction SilentlyContinue)) {
-    Fail "Git for Windows was not found. Install Git for Windows, then run setup.bat again."
-}
-
-& git lfs version
-if ($LASTEXITCODE -ne 0) {
-    Fail "Git LFS is not available. Reinstall/update Git for Windows with Git LFS enabled."
-}
-
-& git lfs install
-if ($LASTEXITCODE -ne 0) {
-    Fail "git lfs install failed."
-}
-
-Write-Step "Downloading/checking 2009Scape LFS files"
-& git lfs pull
-if ($LASTEXITCODE -ne 0) {
-    Fail "git lfs pull failed."
-}
-& git lfs checkout
-if ($LASTEXITCODE -ne 0) {
-    Fail "git lfs checkout failed."
-}
-
+$IsGitClone = Test-Path (Join-Path $Root ".git")
 $CacheProbe = Join-Path $ServerDir "data\cache\main_file_cache.dat2"
+
+if ($IsGitClone) {
+    Write-Step "Git clone detected - checking Git LFS"
+    if (-not (Get-Command git.exe -ErrorAction SilentlyContinue)) {
+        Fail "This is a Git clone, but Git for Windows was not found."
+    }
+
+    & git lfs version
+    if ($LASTEXITCODE -ne 0) {
+        Fail "Git LFS is not available. Reinstall/update Git for Windows with Git LFS enabled."
+    }
+
+    & git lfs install
+    if ($LASTEXITCODE -ne 0) {
+        Fail "git lfs install failed."
+    }
+
+    Write-Step "Downloading/checking 2009Scape LFS files"
+    & git lfs pull
+    if ($LASTEXITCODE -ne 0) {
+        Fail "git lfs pull failed."
+    }
+    & git lfs checkout
+    if ($LASTEXITCODE -ne 0) {
+        Fail "git lfs checkout failed."
+    }
+}
+else {
+    Write-Step "Release ZIP detected - Git and Git LFS are not required"
+}
+
 if (-not (Test-Path $CacheProbe)) {
-    Fail "The RuneScape cache is missing after Git LFS pull."
+    Fail "The RuneScape cache is missing. Use the official Killer Edition release ZIP or run git lfs pull in a Git clone."
 }
 $FirstLine = Get-Content -LiteralPath $CacheProbe -TotalCount 1 -ErrorAction SilentlyContinue
 if ($FirstLine -eq "version https://git-lfs.github.com/spec/v1") {
-    Fail "The RuneScape cache is still an LFS pointer. Git LFS did not materialize the cache."
+    Fail "The RuneScape cache is still an LFS pointer instead of the real cache file."
 }
 
 if (-not (Test-Path $JavaExe)) {
@@ -103,30 +110,36 @@ if ($LASTEXITCODE -ne 0) {
     Fail "The private Java runtime could not be started."
 }
 
-Write-Step "Building 2009Scape"
-Push-Location $ServerDir
-try {
-    & ".\mvnw.cmd" clean package -DskipTests
-    if ($LASTEXITCODE -ne 0) {
-        Fail "Maven build failed."
+$ServerJar = Join-Path $ServerDir "server.jar"
+if ($IsGitClone -or -not (Test-Path $ServerJar)) {
+    Write-Step "Building 2009Scape"
+    Push-Location $ServerDir
+    try {
+        & ".\mvnw.cmd" clean package -DskipTests
+        if ($LASTEXITCODE -ne 0) {
+            Fail "Maven build failed."
+        }
+
+        $BuiltJar = Get-ChildItem -LiteralPath (Join-Path $ServerDir "target") -Filter "*-jar-with-dependencies.jar" |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+
+        if ($null -eq $BuiltJar) {
+            Fail "Build completed but the server JAR was not found."
+        }
+
+        Copy-Item -LiteralPath $BuiltJar.FullName -Destination $ServerJar -Force
     }
-
-    $BuiltJar = Get-ChildItem -LiteralPath (Join-Path $ServerDir "target") -Filter "*-jar-with-dependencies.jar" |
-        Sort-Object LastWriteTime -Descending |
-        Select-Object -First 1
-
-    if ($null -eq $BuiltJar) {
-        Fail "Build completed but the server JAR was not found."
+    finally {
+        Pop-Location
     }
-
-    Copy-Item -LiteralPath $BuiltJar.FullName -Destination (Join-Path $ServerDir "server.jar") -Force
 }
-finally {
-    Pop-Location
+else {
+    Write-Step "Using prebuilt server.jar from release ZIP"
 }
 
 Write-Step "Setup complete"
 Write-Host "Private Java: $JavaHome"
-Write-Host "Server JAR:    $(Join-Path $ServerDir 'server.jar')"
+Write-Host "Server JAR:    $ServerJar"
 Write-Host ""
 Write-Host "Start the server with: server.bat"
