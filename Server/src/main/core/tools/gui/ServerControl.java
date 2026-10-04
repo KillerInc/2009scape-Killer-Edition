@@ -17,10 +17,15 @@ public final class ServerControl {
     private final JTextArea logArea = new JTextArea();
     private final JLabel statusLabel = new JLabel("Offline");
     private final JLabel uptimeLabel = new JLabel("00:00:00");
+    private final JLabel playersLabel = new JLabel("0");
+    private final JLabel botsLabel = new JLabel("0");
+    private final JSpinner minutesSpinner = new JSpinner(new SpinnerNumberModel(1, 0, 1440, 1));
+    private final JSpinner secondsSpinner = new JSpinner(new SpinnerNumberModel(0, 0, 59, 1));
     private final JButton startButton = new JButton("Start Server");
     private final JButton restartButton = new JButton("Restart Server");
     private final JButton shutdownButton = new JButton("Safe Shutdown");
     private final JButton forceStopButton = new JButton("Force Stop");
+    private final JButton cancelCountdownButton = new JButton("Cancel Countdown");
     private final JTextField commandField = new JTextField();
     private final JButton sendButton = new JButton("Send");
 
@@ -31,7 +36,6 @@ public final class ServerControl {
     private volatile Process process;
     private volatile BufferedWriter serverInput;
     private volatile Instant startedAt;
-    private volatile boolean restarting;
 
     public static void main(String[] args) {
         SwingUtilities.invokeLater(() -> {
@@ -76,12 +80,22 @@ public final class ServerControl {
         statusPanel.add(statusLabel);
         statusPanel.add(new JLabel("Uptime:"));
         statusPanel.add(uptimeLabel);
+        statusPanel.add(new JLabel("Players:"));
+        statusPanel.add(playersLabel);
+        statusPanel.add(new JLabel("Bots:"));
+        statusPanel.add(botsLabel);
 
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
         buttons.add(startButton);
         buttons.add(restartButton);
         buttons.add(shutdownButton);
         buttons.add(forceStopButton);
+        buttons.add(cancelCountdownButton);
+        buttons.add(new JLabel("Delay:"));
+        buttons.add(minutesSpinner);
+        buttons.add(new JLabel("min"));
+        buttons.add(secondsSpinner);
+        buttons.add(new JLabel("sec"));
 
         JButton configButton = new JButton("Open Config");
         JButton logsButton = new JButton("Open Logs");
@@ -112,6 +126,13 @@ public final class ServerControl {
         restartButton.addActionListener(e -> restartServer());
         shutdownButton.addActionListener(e -> safeShutdown());
         forceStopButton.addActionListener(e -> forceStop());
+        cancelCountdownButton.addActionListener(e -> {
+            if (isRunning()) {
+                append("[GUI] Cancelling scheduled shutdown/restart...");
+                sendCommand("cancelshutdown");
+                status("Running");
+            }
+        });
         sendButton.addActionListener(e -> sendTypedCommand());
         commandField.addActionListener(e -> sendTypedCommand());
 
@@ -193,6 +214,10 @@ public final class ServerControl {
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
             String line;
             while ((line = reader.readLine()) != null) {
+                if (line.startsWith("[GUI_STATUS] ")) {
+                    parseGuiStatus(line);
+                    continue;
+                }
                 append(line);
                 if (line.contains(" started in ") && line.contains(" milliseconds.")) {
                     SwingUtilities.invokeLater(() -> status("Running"));
@@ -209,9 +234,10 @@ public final class ServerControl {
 
     private synchronized void safeShutdown() {
         if (!isRunning()) return;
-        status("Stopping");
-        append("[GUI] Requesting safe shutdown...");
-        sendCommand("stop");
+        int seconds = selectedDelaySeconds();
+        status("Shutdown scheduled");
+        append("[GUI] Safe shutdown scheduled in " + seconds + " seconds.");
+        sendCommand("shutdown " + seconds);
     }
 
     private synchronized void restartServer() {
@@ -220,10 +246,22 @@ public final class ServerControl {
             return;
         }
 
-        restarting = true;
-        status("Restarting");
-        append("[GUI] Requesting safe restart...");
-        sendCommand("stop");
+        int seconds = selectedDelaySeconds();
+        status("Restart scheduled");
+        append("[GUI] Safe restart scheduled in " + seconds + " seconds.");
+        sendCommand("restart " + seconds);
+    }
+
+    private int selectedDelaySeconds() {
+        int minutes = ((Number) minutesSpinner.getValue()).intValue();
+        int seconds = ((Number) secondsSpinner.getValue()).intValue();
+        int total = minutes * 60 + seconds;
+        if (total < 15) {
+            total = 15;
+            minutesSpinner.setValue(0);
+            secondsSpinner.setValue(15);
+        }
+        return total;
     }
 
     private synchronized void forceStop() {
@@ -255,12 +293,14 @@ public final class ServerControl {
         closeInput();
         startedAt = null;
 
-        boolean doRestart = restarting;
-        restarting = false;
+        boolean doRestart = code == 23;
         status("Offline");
+        playersLabel.setText("0");
+        botsLabel.setText("0");
         updateButtons();
 
         if (doRestart) {
+            append("[GUI] Server requested restart. Starting again...");
             Timer timer = new Timer(1000, e -> startServer());
             timer.setRepeats(false);
             timer.start();
@@ -302,6 +342,9 @@ public final class ServerControl {
         restartButton.setEnabled(running);
         shutdownButton.setEnabled(running);
         forceStopButton.setEnabled(running);
+        cancelCountdownButton.setEnabled(running);
+        minutesSpinner.setEnabled(running);
+        secondsSpinner.setEnabled(running);
         commandField.setEnabled(running);
         sendButton.setEnabled(running);
     }
@@ -323,6 +366,26 @@ public final class ServerControl {
             uptimeLabel.setText(String.format("%02d:%02d:%02d", seconds / 3600, (seconds % 3600) / 60, seconds % 60));
         });
         timer.start();
+
+        Timer statusTimer = new Timer(5000, e -> {
+            if (isRunning()) sendCommand("guistatus");
+        });
+        statusTimer.setInitialDelay(5000);
+        statusTimer.start();
+    }
+
+    private void parseGuiStatus(String line) {
+        try {
+            String payload = line.substring("[GUI_STATUS] ".length());
+            String[] parts = payload.split(" ");
+            for (String part : parts) {
+                String[] kv = part.split("=", 2);
+                if (kv.length != 2) continue;
+                if ("players".equals(kv[0])) playersLabel.setText(kv[1]);
+                if ("bots".equals(kv[0])) botsLabel.setText(kv[1]);
+            }
+        } catch (Exception ignored) {
+        }
     }
 
     private void append(String text) {
