@@ -25,7 +25,7 @@ setup.bat
 server.bat
 ```
 
-The Killer Edition release ZIP includes the real Git LFS/cache files and a prebuilt `Server\server.jar`, so Git and Git LFS are not required for the ZIP install. Setup downloads a private Java runtime into `.runtime` and does not replace or modify your system Java installation.
+The Killer Edition release ZIP includes the real Git LFS/cache files and a prebuilt `Server\server.jar`, so Git and Git LFS are not required for the ZIP install. Setup uses a plain Windows batch file, downloads a private Java runtime into `.runtime`, and does not require changing PowerShell execution policy or your system Java installation.
 
 ---
 
