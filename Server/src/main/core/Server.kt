@@ -2,9 +2,12 @@ package core
 
 import core.api.log
 import core.game.system.SystemManager
+import core.game.system.ServerShutdownScheduler
 import core.game.system.SystemState
 import core.game.system.config.ServerConfigParser
 import core.game.world.GameWorld
+import core.game.world.repository.Repository
+import core.game.bots.AIRepository
 import core.net.NioReactor
 import core.net.websocket.GameWebSocketServer
 import core.net.websocket.WebSocketTls
@@ -101,19 +104,8 @@ object Server {
 
         running = true
         GlobalScope.launch {
-            while(scanner.hasNextLine()){
-                val command = scanner.nextLine()
-                when(command){
-                    "stop" -> {
-                        SystemManager.flag(SystemState.TERMINATED)
-                        exitProcess(0)
-                    }
-
-                    "update" -> SystemManager.flag(SystemState.UPDATING)
-                    "help","commands" -> printCommands()
-                    "restartworker" -> SystemManager.flag(SystemState.ACTIVE)
-
-                }
+            while (scanner.hasNextLine()) {
+                handleConsoleCommand(scanner.nextLine())
             }
         }
 
@@ -153,6 +145,58 @@ object Server {
         }
     }
 
+    private fun handleConsoleCommand(rawCommand: String) {
+        val trimmed = rawCommand.trim()
+        if (trimmed.isEmpty()) return
+
+        val parts = trimmed.split(Regex("\\s+"))
+        val command = parts[0].lowercase()
+
+        when (command) {
+            "stop", "shutdown" -> {
+                val seconds = parts.getOrNull(1)?.toIntOrNull() ?: ServerShutdownScheduler.MINIMUM_SECONDS
+                ServerShutdownScheduler.schedule(ServerShutdownScheduler.Action.SHUTDOWN, seconds)
+            }
+            "restart" -> {
+                val seconds = parts.getOrNull(1)?.toIntOrNull() ?: ServerShutdownScheduler.MINIMUM_SECONDS
+                ServerShutdownScheduler.schedule(ServerShutdownScheduler.Action.RESTART, seconds)
+            }
+            "cancelshutdown", "cancelrestart", "cancel" -> {
+                if (!ServerShutdownScheduler.cancel()) {
+                    println("[ServerControl] No shutdown or restart countdown is active.")
+                }
+            }
+            "status" -> {
+                val realPlayers = Repository.players.count { it != null && !it.isArtificial }
+                val bots = AIRepository.PulseRepository.size
+                val uptimeSeconds = ((System.currentTimeMillis() - startTime) / 1000L).coerceAtLeast(0)
+                val scheduled = if (ServerShutdownScheduler.isScheduled()) {
+                    " | Scheduled: ${ServerShutdownScheduler.getAction()?.name?.lowercase()} in ${ServerShutdownScheduler.formatDuration(ServerShutdownScheduler.getSecondsRemaining())}"
+                } else ""
+                println("[SERVER STATUS] Players: $realPlayers | Bots: $bots | Uptime: ${uptimeSeconds}s$scheduled")
+            }
+            "guistatus" -> {
+                val realPlayers = Repository.players.count { it != null && !it.isArtificial }
+                val bots = AIRepository.PulseRepository.size
+                val uptimeSeconds = ((System.currentTimeMillis() - startTime) / 1000L).coerceAtLeast(0)
+                println("[GUI_STATUS] players=$realPlayers bots=$bots uptime=$uptimeSeconds")
+            }
+            "broadcast" -> {
+                val message = trimmed.substringAfter(' ', "").trim()
+                if (message.isEmpty()) {
+                    println("Usage: broadcast <message>")
+                } else {
+                    ServerShutdownScheduler.broadcast("<col=FFFF00>Server: $message")
+                    println("[ServerControl] Broadcast: $message")
+                }
+            }
+            "update" -> SystemManager.flag(SystemState.UPDATING)
+            "help", "commands" -> printCommands()
+            "restartworker" -> SystemManager.flag(SystemState.ACTIVE)
+            else -> println("Unknown server command: $command. Type help for commands.")
+        }
+    }
+
     private fun checkConnectivity(): Boolean
     {
         //Has to be done this way because you can't actually ping in Java unless you run the whole thing as root
@@ -182,11 +226,15 @@ object Server {
     }
 
     fun printCommands(){
-        println("stop - stop the server (saves all accounts and such)")
-        println("players - show online player count")
-        println("update - initiate an update with a countdown visible to players")
+        println("shutdown [seconds] - safely shut down with announcements (minimum 15 seconds)")
+        println("restart [seconds] - safely restart with announcements (minimum 15 seconds)")
+        println("stop [seconds] - alias for shutdown")
+        println("cancelshutdown - cancel a pending shutdown/restart")
+        println("status - show player count, bot count, uptime, and pending shutdown/restart")
+        println("broadcast <message> - send a server message to all real players")
+        println("update - initiate the legacy system update countdown")
         println("help, commands - show this")
-        println("restartworker - Reboots the major update worker in case of a travesty.")
+        println("restartworker - reboot the major update worker")
     }
 
     fun autoReconnect() {
