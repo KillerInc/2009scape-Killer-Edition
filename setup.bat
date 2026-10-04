@@ -58,7 +58,7 @@ if exist "%ROOT%.git\" (
                 goto :fail
             )
             echo   %%A.archive
-            tar.exe -xf "%ROOT%packages\%%A.archive" -C "%ROOT%"
+            tar.exe -xf "%ROOT%packages\%%A.archive" -C "%~dp0."
             if errorlevel 1 (
                 echo ERROR: Could not extract packages\%%A.archive
                 goto :fail
