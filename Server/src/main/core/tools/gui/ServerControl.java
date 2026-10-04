@@ -393,11 +393,14 @@ public final class ServerControl {
         sendButton.setEnabled(running);
 
         updateButton.setEnabled(true);
-        if (latestManifest != null && latestVersion != null && !latestVersion.equals(readLocalVersion())) {
-            updateButton.setText("Update to v" + latestVersion);
-        } else {
-            updateButton.setText("Update");
+        boolean patchRequired = false;
+        if (latestManifest != null && latestVersion != null) {
+            try {
+                patchRequired = hasPendingComponentChanges(latestManifest);
+            } catch (Exception ignored) {
+            }
         }
+        updateButton.setText(patchRequired ? "Update to v" + latestVersion : "Update");
     }
 
     private void status(String value) {
