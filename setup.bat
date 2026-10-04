@@ -41,7 +41,36 @@ if exist "%ROOT%.git\" (
     git lfs checkout
     if errorlevel 1 goto :lfsfail
 ) else (
-    echo [1/4] Release ZIP detected - Git and Git LFS are not required.
+    echo [1/4] Release package detected - Git and Git LFS are not required.
+
+    if exist "%ROOT%packages\Core.archive" (
+        echo Extracting Killer Edition runtime packages...
+
+        where tar.exe >nul 2>&1
+        if errorlevel 1 (
+            echo ERROR: Windows tar.exe was not found.
+            goto :fail
+        )
+
+        for %%A in (Core Configs Bots Cache) do (
+            if not exist "%ROOT%packages\%%A.archive" (
+                echo ERROR: Missing runtime package: packages\%%A.archive
+                goto :fail
+            )
+            echo   %%A.archive
+            tar.exe -xf "%ROOT%packages\%%A.archive" -C "%ROOT%"
+            if errorlevel 1 (
+                echo ERROR: Could not extract packages\%%A.archive
+                goto :fail
+            )
+        )
+
+        if exist "%ROOT%update-manifest.properties" (
+            copy /y "%ROOT%update-manifest.properties" "%ROOT%.killer-components.properties" >nul
+        )
+
+        echo Runtime packages extracted.
+    )
 )
 
 if not exist "%CACHE_FILE%" (
