@@ -16,6 +16,8 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Locale;
 import java.util.Properties;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
 public final class ServerControl {
     private static final String UPDATE_MANIFEST_URL =
@@ -545,46 +547,42 @@ public final class ServerControl {
                 if (Files.exists(updateRoot)) deleteTree(updateRoot);
                 Files.createDirectories(updateRoot);
 
+                String packageUrl = requiredManifest(manifest, "package.url");
+                String packageSha = requiredManifest(manifest, "package.sha256").toLowerCase(Locale.ROOT);
+                Path packageZip = updateRoot.resolve("update-package.zip");
+
+                append("[UPDATE] Downloading compact update package...");
+                download(new URL(packageUrl), packageZip);
+
+                if (!sha256(packageZip).equals(packageSha)) {
+                    throw new IOException("SHA-256 mismatch for update package.");
+                }
+
+                append("[UPDATE] Extracting update package...");
+                extractZip(packageZip, updateRoot);
+                Files.deleteIfExists(packageZip);
+
                 int count = Integer.parseInt(manifest.getProperty("file.count", "0"));
                 if (count <= 0) throw new IOException("Update manifest has no files.");
 
                 for (int i = 0; i < count; i++) {
                     String rel = requiredManifest(manifest, "file." + i + ".path");
-                    String fileUrl = requiredManifest(manifest, "file." + i + ".url");
                     String expected = requiredManifest(manifest, "file." + i + ".sha256").toLowerCase(Locale.ROOT);
+                    Path staged = safeResolve(updateRoot, rel);
 
-                    Path destination = safeResolve(updateRoot, rel);
-                    if (destination.getParent() != null) Files.createDirectories(destination.getParent());
-
-                    Path installed = safeResolve(installRoot, rel);
-                    if (Files.isRegularFile(installed)) {
-                        try {
-                            if (sha256(installed).equals(expected)) {
-                                append("[UPDATE] Unchanged, skipping " + rel);
-                                Files.copy(installed, destination, StandardCopyOption.REPLACE_EXISTING);
-                                continue;
-                            }
-                        } catch (Exception ignored) {
-                        }
+                    if (!Files.isRegularFile(staged)) {
+                        throw new IOException("Update package is missing " + rel);
                     }
-
-                    append("[UPDATE] Downloading " + rel + "...");
-                    download(new URL(fileUrl), destination);
-
-                    String actual = sha256(destination);
-                    if (!actual.equals(expected)) {
+                    if (!sha256(staged).equals(expected)) {
                         throw new IOException("SHA-256 mismatch for " + rel);
                     }
                 }
 
-                String helperUrl = requiredManifest(manifest, "updater.url");
+                String helperRel = requiredManifest(manifest, "updater.path");
                 String helperSha = requiredManifest(manifest, "updater.sha256").toLowerCase(Locale.ROOT);
-                Path helper = updateRoot.resolve("KillerUpdater.jar");
+                Path helper = safeResolve(updateRoot, helperRel);
 
-                append("[UPDATE] Downloading updater helper...");
-                download(new URL(helperUrl), helper);
-
-                if (!sha256(helper).equals(helperSha)) {
+                if (!Files.isRegularFile(helper) || !sha256(helper).equals(helperSha)) {
                     throw new IOException("SHA-256 mismatch for updater helper.");
                 }
 
@@ -628,7 +626,7 @@ public final class ServerControl {
                 throw new IOException("No staged update.");
             }
 
-            Path helper = stagedUpdateDir.resolve("KillerUpdater.jar");
+            Path helper = safeResolve(stagedUpdateDir, requiredManifest(latestManifest, "updater.path"));
             Path manifest = stagedUpdateDir.resolve("update-manifest.properties");
             long pid = ProcessHandle.current().pid();
 
@@ -674,6 +672,32 @@ public final class ServerControl {
             while ((n = in.read(buffer)) > 0) out.write(buffer, 0, n);
         }
         Files.move(temp, destination, StandardCopyOption.REPLACE_EXISTING);
+    }
+
+    private static void extractZip(Path zipFile, Path destination) throws IOException {
+        try (ZipInputStream zin = new ZipInputStream(Files.newInputStream(zipFile))) {
+            ZipEntry entry;
+            while ((entry = zin.getNextEntry()) != null) {
+                Path out = destination.resolve(entry.getName()).normalize();
+                if (!out.startsWith(destination)) {
+                    throw new IOException("Unsafe ZIP entry: " + entry.getName());
+                }
+
+                if (entry.isDirectory()) {
+                    Files.createDirectories(out);
+                } else {
+                    if (out.getParent() != null) Files.createDirectories(out.getParent());
+                    try (OutputStream output = Files.newOutputStream(out,
+                            StandardOpenOption.CREATE,
+                            StandardOpenOption.TRUNCATE_EXISTING)) {
+                        byte[] buffer = new byte[1024 * 1024];
+                        int n;
+                        while ((n = zin.read(buffer)) > 0) output.write(buffer, 0, n);
+                    }
+                }
+                zin.closeEntry();
+            }
+        }
     }
 
     private static String sha256(Path file) throws Exception {
