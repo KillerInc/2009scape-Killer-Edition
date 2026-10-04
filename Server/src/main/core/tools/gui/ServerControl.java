@@ -87,9 +87,22 @@ public final class ServerControl {
         String exe = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win") ? "java.exe" : "java";
         javaExe = Paths.get(System.getProperty("java.home"), "bin", exe);
 
+        cleanupUpdateStage();
         buildUi();
         updateButtons();
         startTimers();
+    }
+
+    private void cleanupUpdateStage() {
+        Path updateStage = installRoot.resolve(".update-stage");
+        if (!Files.exists(updateStage)) return;
+
+        try {
+            deleteTree(updateStage);
+            System.out.println("[GUI] Cleared old update staging data: " + updateStage);
+        } catch (IOException ex) {
+            System.err.println("[GUI] Could not clear old update staging data: " + ex.getMessage());
+        }
     }
 
     private void buildUi() {
