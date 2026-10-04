@@ -42,3 +42,6 @@ Server/hasRan.txt
 # Env files containing secrets
 /.env
 /*.env
+
+# Repo-local Java runtime installed by setup.bat
+.runtime/
