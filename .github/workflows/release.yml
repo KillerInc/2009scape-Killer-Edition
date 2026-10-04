@@ -10,6 +10,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: killer-release
+  cancel-in-progress: true
+
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -68,7 +72,7 @@ jobs:
           test -s Tools/Updater/KillerUpdater.jar
           rm -rf Tools/Updater/build
 
-      - name: Build release ZIP
+      - name: Build component archives and clean releases
         id: package
         shell: bash
         run: |
@@ -76,86 +80,141 @@ jobs:
 
           VERSION="$(tr -d '\r\n ' < VERSION)"
           TAG="v$VERSION"
-          NAME="2009scape-Killer-Edition_v$VERSION.zip"
-          STAGE="$RUNNER_TEMP/2009scape-Killer-Edition"
-
-          rm -rf "$STAGE"
-          mkdir -p "$STAGE"
-
-          rsync -a ./ "$STAGE/" \
-            --exclude='.git/' \
-            --exclude='.github/' \
-            --exclude='.runtime/' \
-            --exclude='Server/target/' \
-            --exclude='Server/hasRan.txt'
-
-          test -s "$STAGE/Server/server.jar"
-          test -s "$STAGE/Server/data/cache/main_file_cache.dat2"
-
-          cd "$RUNNER_TEMP"
-          7z a -tzip -mx=1 -mmt=on "$NAME" "2009scape-Killer-Edition" >/dev/null
-
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "name=$NAME" >> "$GITHUB_OUTPUT"
-          echo "path=$RUNNER_TEMP/$NAME" >> "$GITHUB_OUTPUT"
-
-          MANIFEST="$RUNNER_TEMP/update-manifest.properties"
-          UPDATE_NAME="2009scape-Killer-Edition_Update_v$VERSION.zip"
-          UPDATE_STAGE="$RUNNER_TEMP/update-package"
-          UPDATE_ZIP="$RUNNER_TEMP/$UPDATE_NAME"
           BASE_URL="https://github.com/KillerInc/2009scape-Killer-Edition/releases/download/$TAG"
+
+          WORK="$RUNNER_TEMP/killer-package"
+          FULL="$WORK/2009scape-Killer-Edition"
+          COMPONENTS="$WORK/components"
+          MANIFEST="$WORK/update-manifest.properties"
+          ZIP_NAME="2009scape-Killer-Edition_v$VERSION.zip"
+          SEVEN_NAME="2009scape-Killer-Edition_v$VERSION.7z"
+          ZIP_PATH="$RUNNER_TEMP/$ZIP_NAME"
+          SEVEN_PATH="$RUNNER_TEMP/$SEVEN_NAME"
+
+          rm -rf "$WORK"
+          mkdir -p "$FULL/packages" "$FULL/Server/worldprops" "$COMPONENTS"
+
+          make_archive() {
+            local archive="$1"
+            local stage="$2"
+            rm -f "$archive"
+            (
+              cd "$stage"
+              7z a -tzip -mx=1 -mmt=on "$archive" . >/dev/null
+            )
+            test -s "$archive"
+          }
 
           sha256_file() {
             sha256sum "$1" | awk '{print $1}'
           }
 
-          rm -rf "$UPDATE_STAGE"
-          mkdir -p "$UPDATE_STAGE/Server" "$UPDATE_STAGE/Tools/Updater"
-          cp "$GITHUB_WORKSPACE/Server/server.jar" "$UPDATE_STAGE/Server/server.jar"
-          cp "$GITHUB_WORKSPACE/server-gui.bat" "$UPDATE_STAGE/server-gui.bat"
-          cp "$GITHUB_WORKSPACE/server.bat" "$UPDATE_STAGE/server.bat"
-          cp "$GITHUB_WORKSPACE/setup.bat" "$UPDATE_STAGE/setup.bat"
-          cp "$GITHUB_WORKSPACE/VERSION" "$UPDATE_STAGE/VERSION"
-          cp "$GITHUB_WORKSPACE/Tools/Updater/KillerUpdater.jar" "$UPDATE_STAGE/Tools/Updater/KillerUpdater.jar"
+          # Core runtime: compiled server + launchers + updater only.
+          CORE_STAGE="$WORK/core-stage"
+          mkdir -p "$CORE_STAGE/Server" "$CORE_STAGE/Tools/Updater"
+          cp Server/server.jar "$CORE_STAGE/Server/server.jar"
+          cp server.bat "$CORE_STAGE/server.bat"
+          cp server-gui.bat "$CORE_STAGE/server-gui.bat"
+          cp run-server.bat "$CORE_STAGE/run-server.bat"
+          cp VERSION "$CORE_STAGE/VERSION"
+          cp Tools/Updater/KillerUpdater.jar "$CORE_STAGE/Tools/Updater/KillerUpdater.jar"
+          make_archive "$COMPONENTS/Core.archive" "$CORE_STAGE"
 
-          cd "$UPDATE_STAGE"
-          7z a -tzip -mx=1 -mmt=on "$UPDATE_ZIP" . >/dev/null
-          cd "$GITHUB_WORKSPACE"
+          # Runtime data groups. These are intentionally independent so patching
+          # downloads only the group whose SHA-256 changed.
+          CONFIG_STAGE="$WORK/config-stage"
+          mkdir -p "$CONFIG_STAGE/Server/data"
+          cp -a Server/data/configs "$CONFIG_STAGE/Server/data/configs"
+          make_archive "$COMPONENTS/Configs.archive" "$CONFIG_STAGE"
 
-          {
-            echo "version=$VERSION"
-            echo "file.count=5"
-            echo "file.0.path=Server/server.jar"
-            echo "file.0.sha256=$(sha256_file "$GITHUB_WORKSPACE/Server/server.jar")"
-            echo "file.1.path=server-gui.bat"
-            echo "file.1.sha256=$(sha256_file "$GITHUB_WORKSPACE/server-gui.bat")"
-            echo "file.2.path=server.bat"
-            echo "file.2.sha256=$(sha256_file "$GITHUB_WORKSPACE/server.bat")"
-            echo "file.3.path=setup.bat"
-            echo "file.3.sha256=$(sha256_file "$GITHUB_WORKSPACE/setup.bat")"
-            echo "file.4.path=VERSION"
-            echo "file.4.sha256=$(sha256_file "$GITHUB_WORKSPACE/VERSION")"
-            echo "updater.path=Tools/Updater/KillerUpdater.jar"
-            echo "updater.sha256=$(sha256_file "$GITHUB_WORKSPACE/Tools/Updater/KillerUpdater.jar")"
-            echo "package.url=$BASE_URL/$UPDATE_NAME"
-            echo "package.sha256=$(sha256_file "$UPDATE_ZIP")"
-          } > "$MANIFEST"
+          BOTS_STAGE="$WORK/bots-stage"
+          mkdir -p "$BOTS_STAGE/Server/data"
+          cp -a Server/data/botdata "$BOTS_STAGE/Server/data/botdata"
+          make_archive "$COMPONENTS/Bots.archive" "$BOTS_STAGE"
 
+          CACHE_STAGE="$WORK/cache-stage"
+          mkdir -p "$CACHE_STAGE/Server/data"
+          cp -a Server/data/cache "$CACHE_STAGE/Server/data/cache"
+          make_archive "$COMPONENTS/Cache.archive" "$CACHE_STAGE"
+
+          CORE_SHA="$(sha256_file "$COMPONENTS/Core.archive")"
+          CONFIG_SHA="$(sha256_file "$COMPONENTS/Configs.archive")"
+          BOTS_SHA="$(sha256_file "$COMPONENTS/Bots.archive")"
+          CACHE_SHA="$(sha256_file "$COMPONENTS/Cache.archive")"
+
+          cat > "$MANIFEST" <<EOF
+          version=$VERSION
+          component.count=4
+          component.0.name=Core
+          component.0.file=packages/Core.archive
+          component.0.sha256=$CORE_SHA
+          component.0.url=$BASE_URL/Core.archive
+          component.0.clean=
+          component.0.backup=true
+          component.1.name=Configs
+          component.1.file=packages/Configs.archive
+          component.1.sha256=$CONFIG_SHA
+          component.1.url=$BASE_URL/Configs.archive
+          component.1.clean=Server/data/configs
+          component.1.backup=true
+          component.2.name=Bots
+          component.2.file=packages/Bots.archive
+          component.2.sha256=$BOTS_SHA
+          component.2.url=$BASE_URL/Bots.archive
+          component.2.clean=Server/data/botdata
+          component.2.backup=true
+          component.3.name=Cache
+          component.3.file=packages/Cache.archive
+          component.3.sha256=$CACHE_SHA
+          component.3.url=$BASE_URL/Cache.archive
+          component.3.clean=Server/data/cache
+          component.3.backup=false
+          EOF
+
+          # Fresh-install shell contains only installer/user-facing files plus
+          # the four archives. Source, dumps, tests, build tooling and dev tools
+          # are deliberately not distributed.
+          cp setup.bat "$FULL/setup.bat"
+          cp README.md "$FULL/README.md"
+          cp LICENSE "$FULL/LICENSE"
+          cp Server/worldprops/default.conf "$FULL/Server/worldprops/default.conf"
+          cp "$MANIFEST" "$FULL/update-manifest.properties"
+          cp "$COMPONENTS/"*.archive "$FULL/packages/"
+
+          cd "$WORK"
+          7z a -tzip -mx=0 -mmt=on "$ZIP_PATH" "2009scape-Killer-Edition" >/dev/null
+          7z a -t7z -mx=1 -mmt=on "$SEVEN_PATH" "2009scape-Killer-Edition" >/dev/null
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "zip_name=$ZIP_NAME" >> "$GITHUB_OUTPUT"
+          echo "zip_path=$ZIP_PATH" >> "$GITHUB_OUTPUT"
+          echo "seven_name=$SEVEN_NAME" >> "$GITHUB_OUTPUT"
+          echo "seven_path=$SEVEN_PATH" >> "$GITHUB_OUTPUT"
           echo "manifest=$MANIFEST" >> "$GITHUB_OUTPUT"
-          echo "update_zip=$UPDATE_ZIP" >> "$GITHUB_OUTPUT"
-          echo "update_name=$UPDATE_NAME" >> "$GITHUB_OUTPUT"
+          echo "core=$COMPONENTS/Core.archive" >> "$GITHUB_OUTPUT"
+          echo "configs=$COMPONENTS/Configs.archive" >> "$GITHUB_OUTPUT"
+          echo "bots=$COMPONENTS/Bots.archive" >> "$GITHUB_OUTPUT"
+          echo "cache=$COMPONENTS/Cache.archive" >> "$GITHUB_OUTPUT"
+
+          echo "Clean release contents:"
+          find "$FULL" -type f -printf '%P\n' | sort
+          echo "File count: $(find "$FULL" -type f | wc -l)"
 
       - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.package.outputs.tag }}
           VERSION: ${{ steps.package.outputs.version }}
-          ZIP_PATH: ${{ steps.package.outputs.path }}
-          ZIP_NAME: ${{ steps.package.outputs.name }}
+          ZIP_PATH: ${{ steps.package.outputs.zip_path }}
+          ZIP_NAME: ${{ steps.package.outputs.zip_name }}
+          SEVEN_PATH: ${{ steps.package.outputs.seven_path }}
+          SEVEN_NAME: ${{ steps.package.outputs.seven_name }}
           MANIFEST_PATH: ${{ steps.package.outputs.manifest }}
-          UPDATE_ZIP: ${{ steps.package.outputs.update_zip }}
-          UPDATE_NAME: ${{ steps.package.outputs.update_name }}
+          CORE_PATH: ${{ steps.package.outputs.core }}
+          CONFIGS_PATH: ${{ steps.package.outputs.configs }}
+          BOTS_PATH: ${{ steps.package.outputs.bots }}
+          CACHE_PATH: ${{ steps.package.outputs.cache }}
         shell: bash
         run: |
           set -euo pipefail
@@ -164,22 +223,31 @@ jobs:
           2009Scape Killer Edition $TAG
 
           Windows quick start:
-          1. Download $ZIP_NAME
-          2. Extract it
-          3. Run setup.bat once
-          4. Run server-gui.bat for the graphical server controller, or server.bat for console-only mode.
+          1. Recommended: download $SEVEN_NAME and extract it with 7-Zip.
+             The normal $ZIP_NAME is also available.
+          2. Run setup.bat once.
+          3. Run server-gui.bat for the graphical server controller, or server.bat for console-only mode.
 
-          This package includes the materialized RuneScape cache and a prebuilt server.jar with the lightweight Server Control GUI and self-patcher built in.
-          Existing Killer Edition installs can update from the Server Control GUI using the compact $UPDATE_NAME patch package.
-          Git and Git LFS are not required when using this release ZIP.
-          setup.bat downloads a private Temurin JDK 11 runtime into .runtime and does not change system Java.
+          The fresh-install archive contains only runtime files. Development source,
+          dumps, tests, Maven files, Docker files and cache-editing tools are excluded.
+
+          Runtime data is split into independently hashed Core, Configs, Bots and Cache
+          component archives. The Server Control updater compares those SHA-256 hashes
+          and downloads only components that changed.
+
+          Player saves, worldprops, logs and the private .runtime Java installation are
+          never replaced by normal component updates.
           EOF
           )"
 
           ASSETS=(
             "$ZIP_PATH"
+            "$SEVEN_PATH"
             "$MANIFEST_PATH"
-            "$UPDATE_ZIP"
+            "$CORE_PATH"
+            "$CONFIGS_PATH"
+            "$BOTS_PATH"
+            "$CACHE_PATH"
           )
 
           if gh release view "$TAG" >/dev/null 2>&1; then
