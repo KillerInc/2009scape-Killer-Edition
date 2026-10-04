@@ -34,3 +34,53 @@ jobs:
           & ".runtime\jdk-11\bin\java.exe" -version
           $jarEntries = & ".runtime\jdk-11\bin\jar.exe" tf "Server\server.jar"
           if ($jarEntries -notcontains "core/tools/gui/ServerControl.class") { throw "Integrated ServerControl.class missing from server.jar" }
+
+      - name: Test release-package extraction path
+        shell: powershell
+        run: |
+          $root = (Resolve-Path ".").Path
+          $release = Join-Path $env:RUNNER_TEMP "Killer Release Test"
+          if (Test-Path $release) { Remove-Item $release -Recurse -Force }
+          New-Item -ItemType Directory -Path $release | Out-Null
+          New-Item -ItemType Directory -Path (Join-Path $release "packages") | Out-Null
+          New-Item -ItemType Directory -Path (Join-Path $release "Server\worldprops") -Force | Out-Null
+
+          Copy-Item "setup.bat" $release
+          Copy-Item "Server\worldprops\default.conf" (Join-Path $release "Server\worldprops\default.conf")
+          Copy-Item ".runtime" (Join-Path $release ".runtime") -Recurse
+
+          function New-Archive($name, $items) {
+              $stage = Join-Path $env:RUNNER_TEMP ("stage-" + $name)
+              if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
+              New-Item -ItemType Directory -Path $stage | Out-Null
+              foreach ($item in $items) {
+                  $source = Join-Path $root $item
+                  $dest = Join-Path $stage $item
+                  New-Item -ItemType Directory -Path (Split-Path $dest) -Force | Out-Null
+                  if ((Get-Item $source).PSIsContainer) {
+                      Copy-Item $source $dest -Recurse
+                  } else {
+                      Copy-Item $source $dest
+                  }
+              }
+              $zip = Join-Path $env:RUNNER_TEMP ($name + ".zip")
+              if (Test-Path $zip) { Remove-Item $zip -Force }
+              Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $zip -CompressionLevel Fastest
+              Move-Item $zip (Join-Path $release ("packages\" + $name + ".archive"))
+          }
+
+          New-Archive "Core" @("Server\server.jar", "server.bat", "server-gui.bat", "VERSION")
+          New-Archive "Configs" @("Server\data\configs")
+          New-Archive "Bots" @("Server\data\botdata")
+          New-Archive "Cache" @("Server\data\cache")
+
+          Push-Location $release
+          try {
+              $env:CI = "1"
+              cmd /c setup.bat
+              if ($LASTEXITCODE -ne 0) { throw "Release-package setup.bat failed with $LASTEXITCODE" }
+              if (-not (Test-Path "Server\server.jar")) { throw "Release extraction did not create server.jar" }
+              if (-not (Test-Path "Server\data\cache\main_file_cache.dat2")) { throw "Release extraction did not create cache" }
+          } finally {
+              Pop-Location
+          }
