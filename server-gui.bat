@@ -3,7 +3,7 @@ setlocal
 cd /d "%~dp0"
 
 set "JAVA_HOME=%~dp0.runtime\jdk-11"
-set "JAVA_EXE=%JAVA_HOME%\bin\java.exe"
+set "JAVA_EXE=%JAVA_HOME%\bin\javaw.exe"
 set "SERVER_JAR=%~dp0Server\server.jar"
 
 if not exist "%JAVA_EXE%" (
