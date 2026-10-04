@@ -550,6 +550,18 @@ public final class ServerControl {
                     Path destination = safeResolve(updateRoot, rel);
                     if (destination.getParent() != null) Files.createDirectories(destination.getParent());
 
+                    Path installed = safeResolve(installRoot, rel);
+                    if (Files.isRegularFile(installed)) {
+                        try {
+                            if (sha256(installed).equals(expected)) {
+                                append("[UPDATE] Unchanged, skipping " + rel);
+                                Files.copy(installed, destination, StandardCopyOption.REPLACE_EXISTING);
+                                continue;
+                            }
+                        } catch (Exception ignored) {
+                        }
+                    }
+
                     append("[UPDATE] Downloading " + rel + "...");
                     download(new URL(fileUrl), destination);
 
