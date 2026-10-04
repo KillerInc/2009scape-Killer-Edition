@@ -16,7 +16,7 @@ set "CACHE_FILE=%SERVER_DIR%\data\cache\main_file_cache.dat2"
 set "SERVER_JAR=%SERVER_DIR%\server.jar"
 
 if exist "%ROOT%.git\" (
-    echo [1/4] Git clone detected - checking Git LFS...
+    echo [1/5] Git clone detected - checking Git LFS...
 
     where git.exe >nul 2>&1
     if errorlevel 1 (
@@ -41,7 +41,7 @@ if exist "%ROOT%.git\" (
     git lfs checkout
     if errorlevel 1 goto :lfsfail
 ) else (
-    echo [1/4] Release ZIP detected - Git and Git LFS are not required.
+    echo [1/5] Release ZIP detected - Git and Git LFS are not required.
 )
 
 if not exist "%CACHE_FILE%" (
@@ -58,14 +58,14 @@ if not errorlevel 1 (
     goto :fail
 )
 
-echo [2/4] RuneScape cache OK.
+echo [2/5] RuneScape cache OK.
 
 if exist "%JAVA_EXE%" (
-    echo [3/4] Private Temurin JDK 11 already installed.
+    echo [3/5] Private Temurin JDK 11 already installed.
     goto :java_ready
 )
 
-echo [3/4] Installing private Temurin JDK 11...
+echo [3/5] Installing private Temurin JDK 11...
 
 where curl.exe >nul 2>&1
 if errorlevel 1 (
@@ -136,11 +136,11 @@ if errorlevel 1 (
 if exist "%ROOT%.git\" goto :build
 if not exist "%SERVER_JAR%" goto :build
 
-echo [4/4] Using prebuilt Server\server.jar from release ZIP.
-goto :ready
+echo [4/5] Using prebuilt Server\server.jar from release ZIP.
+goto :build_gui
 
 :build
-echo [4/4] Building 2009Scape server...
+echo [4/5] Building 2009Scape server...
 pushd "%SERVER_DIR%"
 
 set "JAVA_HOME=%ROOT%.runtime\jdk-11"
@@ -171,6 +171,37 @@ if errorlevel 1 (
 
 popd
 
+:build_gui
+echo [5/5] Building lightweight Server Control GUI...
+set "GUI_SRC=%ROOT%Tools\ServerControl\src\killer\servercontrol\ServerControl.java"
+set "GUI_OUT=%ROOT%Tools\ServerControl\build"
+set "GUI_JAR=%ROOT%Tools\ServerControl\ServerControl.jar"
+
+if not exist "%GUI_SRC%" (
+    echo ERROR: Server Control GUI source is missing.
+    goto :fail
+)
+
+if exist "%GUI_OUT%" rmdir /s /q "%GUI_OUT%"
+mkdir "%GUI_OUT%"
+
+"%JAVA_HOME%\bin\javac.exe" -encoding UTF-8 -d "%GUI_OUT%" "%GUI_SRC%"
+if errorlevel 1 (
+    echo ERROR: Server Control GUI compilation failed.
+    goto :fail
+)
+
+pushd "%GUI_OUT%"
+"%JAVA_HOME%\bin\jar.exe" --create --file "%GUI_JAR%" --main-class killer.servercontrol.ServerControl killer
+if errorlevel 1 (
+    popd
+    echo ERROR: Could not create ServerControl.jar.
+    goto :fail
+)
+popd
+
+rmdir /s /q "%GUI_OUT%" >nul 2>&1
+
 :ready
 echo.
 echo ==========================================
@@ -179,7 +210,7 @@ echo ==========================================
 echo Java:  %JAVA_EXE%
 echo Server: %SERVER_JAR%
 echo.
-echo Run server.bat to start 2009Scape.
+echo Run server-gui.bat for the GUI, or server.bat for console-only mode.
 echo.
 if not defined CI pause
 exit /b 0
