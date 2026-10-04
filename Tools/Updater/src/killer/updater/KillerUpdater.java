@@ -119,7 +119,7 @@ public final class KillerUpdater {
         int componentCount = Integer.parseInt(p.getProperty("component.count", "0"));
         if (componentCount <= 0) throw new IOException("Update manifest contains no components.");
 
-        List<Integer> changed = new ArrayList<>();
+        java.util.List<Integer> changed = new ArrayList<>();
         for (int i = 0; i < componentCount; i++) {
             String archiveRel = required(p, "component." + i + ".file");
             Path archive = safeResolve(stage, archiveRel);
