@@ -47,6 +47,17 @@ jobs:
           cp "$JAR" server.jar
           test -s server.jar
 
+      - name: Build lightweight Server Control GUI
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf Tools/ServerControl/build
+          mkdir -p Tools/ServerControl/build
+          javac -encoding UTF-8 -d Tools/ServerControl/build Tools/ServerControl/src/killer/servercontrol/ServerControl.java
+          jar --create --file Tools/ServerControl/ServerControl.jar --main-class killer.servercontrol.ServerControl -C Tools/ServerControl/build killer
+          test -s Tools/ServerControl/ServerControl.jar
+          rm -rf Tools/ServerControl/build
+
       - name: Build release ZIP
         id: package
         shell: bash
@@ -97,9 +108,9 @@ jobs:
           1. Download $ZIP_NAME
           2. Extract it
           3. Run setup.bat once
-          4. Run server.bat
+          4. Run server-gui.bat for the graphical server controller, or server.bat for console-only mode.
 
-          This package includes the materialized RuneScape cache and a prebuilt server.jar.
+          This package includes the materialized RuneScape cache, a prebuilt server.jar, and the lightweight Server Control GUI.
           Git and Git LFS are not required when using this release ZIP.
           setup.bat downloads a private Temurin JDK 11 runtime into .runtime and does not change system Java.
           EOF
