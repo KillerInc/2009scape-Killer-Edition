@@ -213,6 +213,9 @@ public final class DialogueInterpreter {
             }
         }
         activeTopics.clear();
+        if (dialogue == null) {
+            ModernQuestChatProtocol.close(player);
+        }
         return dialogue == null;
     }
 
@@ -244,6 +247,15 @@ public final class DialogueInterpreter {
         }
         player.getInterfaceManager().openChatbox(interfaceId);
         player.getPacketDispatch().sendInterfaceConfig(player.getInterfaceManager().getChatbox().getId(), 1, false);
+        ModernQuestChatProtocol.sendDialogue(
+            player,
+            0,
+            -1,
+            "",
+            -1,
+            true,
+            messages
+        );
         return player.getInterfaceManager().getChatbox();
     }
 
@@ -256,6 +268,17 @@ public final class DialogueInterpreter {
     public Component sendPlainMessage(final boolean hideContinue, String... messages) {
         sendDialogue(messages);
         player.getPacketDispatch().sendInterfaceConfig(player.getInterfaceManager().getChatbox().getId(), (messages.length + 1), hideContinue);
+        if (hideContinue) {
+            ModernQuestChatProtocol.sendDialogue(
+                player,
+                0,
+                -1,
+                "",
+                -1,
+                false,
+                messages
+            );
+        }
         return player.getInterfaceManager().getChatbox();
     }
 
@@ -542,6 +565,19 @@ public final class DialogueInterpreter {
         player.getPacketDispatch().sendInterfaceConfig(player.getInterfaceManager().getChatbox().getId(), 3, false);
         // Open the chatbox only after everything is set to avoid lag and flashing default strings (Line 1, Title)
         player.getInterfaceManager().openChatbox(interfaceId);
+
+        ModernQuestChatProtocol.sendDialogue(
+            player,
+            npc ? 1 : 2,
+            npc ? npcId : -1,
+            npc
+                ? NPCDefinition.forId(npcId).getName()
+                : player.getUsername(),
+            expression,
+            !hide,
+            messages
+        );
+
         return player.getInterfaceManager().getChatbox();
     }
 
@@ -563,6 +599,11 @@ public final class DialogueInterpreter {
         }
         // Open the chatbox only after everything is set to avoid lag and flashing default strings (Line 1, Title)
         player.getInterfaceManager().openChatbox(interfaceId);
+        ModernQuestChatProtocol.sendOptions(
+            player,
+            title == null ? "" : title.toString(),
+            options
+        );
         return player.getInterfaceManager().getChatbox();
     }
 
