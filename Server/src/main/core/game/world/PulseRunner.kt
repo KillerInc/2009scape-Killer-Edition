@@ -5,6 +5,7 @@ import core.game.system.task.Pulse
 import core.game.bots.GeneralBotCreator
 import core.tools.Log
 import core.tools.SystemLogger
+import core.tools.PerformanceProbe
 import core.ServerConstants
 import java.util.concurrent.LinkedBlockingQueue
 import core.integrations.grafana.*
@@ -26,18 +27,19 @@ class PulseRunner {
         for (i in 0 until pulseCount) {
             val pulse = pulses.take()
 
-            val elapsedTime = measure {
-                try {
-                    if (!pulse.update() && pulse.isRunning) {
-                        pulses.add(pulse)
-                    }
-                } catch (e: Exception) {
-                    log(this::class.java, Log.ERR,  "Pulse execution error. Stack trace below.")
-                    e.printStackTrace()
+            val pulseStartNs = System.nanoTime()
+            try {
+                if (!pulse.update() && pulse.isRunning) {
+                    pulses.add(pulse)
                 }
+            } catch (e: Exception) {
+                log(this::class.java, Log.ERR,  "Pulse execution error. Stack trace below.")
+                e.printStackTrace()
             }
+            val elapsedNs = System.nanoTime() - pulseStartNs
+            val elapsedTime = elapsedNs / 1_000_000L
 
-            var pulseName = pulse::class.java.name
+            val pulseName = pulse::class.java.name
 
             if (pulse is GeneralBotCreator.BotScriptPulse || pulseName.contains("ScriptAPI")) {
                 totalTimeBotPulses += elapsedTime.toInt()
@@ -45,6 +47,7 @@ class PulseRunner {
                 totalTimeOtherPulses += elapsedTime.toInt()
             }
 
+            PerformanceProbe.recordPulse(pulseName, elapsedNs)
             Grafana.addPulseLength (pulseName, elapsedTime.toInt())
             Grafana.countPulse (pulseName)
 
@@ -55,14 +58,6 @@ class PulseRunner {
             Grafana.botPulseTime = totalTimeBotPulses
             Grafana.otherPulseTime = totalTimeOtherPulses
         }
-    }
-
-    private fun measure(logic: () -> Unit): Long {
-        val startTime = System.currentTimeMillis()
-
-        logic()
-
-        return System.currentTimeMillis() - startTime
     }
 
     private fun notifyIfTooLong(pulse: Pulse, elapsedTime: Long) {
