@@ -10,6 +10,7 @@ import core.net.packet.context.PlayerContext
 import core.net.packet.out.ClearMinimapFlag
 import core.game.world.repository.Repository
 import core.integrations.grafana.*
+import core.tools.PerformanceProbe
 
 /**
  * The entity update sequence.
@@ -34,33 +35,53 @@ class UpdateSequence
         npcList = Repository.renderableNpcs
         lobbyList!!.map{ PacketRepository.send(ClearMinimapFlag::class.java, PlayerContext(it)) }
 
-        var npcTickStart = System.currentTimeMillis()
+        var probe = PerformanceProbe.begin()
+        val npcTickStart = System.currentTimeMillis()
         npcList!!.forEach(NPC::tick)
         Grafana.npcTickTime = (System.currentTimeMillis() - npcTickStart).toInt()
+        PerformanceProbe.phase("entities.npcTick", probe)
 
-        var playerTickStart = System.currentTimeMillis()
+        probe = PerformanceProbe.begin()
+        val playerTickStart = System.currentTimeMillis()
         renderablePlayers.forEach(Player::tick)
         Grafana.playerTickTime = (System.currentTimeMillis() - playerTickStart).toInt()
+        PerformanceProbe.phase("entities.playerTick", probe)
     }
 
     /**
      * Runs the updating part of the sequence.
      */
     fun run() {
-        var playerRenderStart = System.currentTimeMillis()
+        val probe = PerformanceProbe.begin()
+        val playerRenderStart = System.currentTimeMillis()
         renderablePlayers.forEach(Player::update)
         Grafana.playerRenderTime = (System.currentTimeMillis() - playerRenderStart).toInt()
+        PerformanceProbe.phase("entities.playerUpdate", probe)
     }
 
     /**
      * Ends the sequence, calls the [Entity.reset] method..
      */
     fun end() {
+        var probe = PerformanceProbe.begin()
         playersList!!.forEach(Player::reset)
+        PerformanceProbe.phase("entities.playerReset", probe)
+
+        probe = PerformanceProbe.begin()
         npcList!!.forEach(NPC::reset)
+        PerformanceProbe.phase("entities.npcReset", probe)
+
+        probe = PerformanceProbe.begin()
         renderablePlayers.sync()
+        PerformanceProbe.phase("entities.playerSync", probe)
+
+        probe = PerformanceProbe.begin()
         ChunkUpdateTracker.resetAll()
+        PerformanceProbe.phase("chunks.reset", probe)
+
+        probe = PerformanceProbe.begin()
         GroundItemManager.pulse()
+        PerformanceProbe.phase("groundItems.pulse", probe)
     }
 
     /**
