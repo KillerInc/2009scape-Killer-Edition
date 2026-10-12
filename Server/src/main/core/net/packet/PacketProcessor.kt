@@ -49,6 +49,7 @@ import core.net.packet.`in`.Packet
 import core.net.packet.`in`.RunScript
 import core.net.packet.out.ClearMinimapFlag
 import core.tools.Log
+import core.tools.PerformanceProbe
 import core.worker.ManagementEvents
 import org.rs09.consts.Components
 import proto.management.ClanMessage
@@ -68,6 +69,7 @@ object PacketProcessor {
         synchronized(queueLock) {
             queue.addLast(pkt)
         }
+        PerformanceProbe.counter("packets.enqueued")
     }
 
     @JvmStatic fun processQueue() {
@@ -84,6 +86,7 @@ object PacketProcessor {
         var pkt: Packet
         while (processingQueue.isNotEmpty()) {
             pkt = processingQueue.pollFirst() ?: return
+            PerformanceProbe.counter("packets.processed")
             if (pkt is Packet.NoProcess) {
                 synchronized(queueLock) {
                     queue.clear()
