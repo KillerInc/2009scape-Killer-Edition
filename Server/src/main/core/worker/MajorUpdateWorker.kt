@@ -15,6 +15,7 @@ import core.net.packet.PacketWriteQueue
 import core.plugin.CorePluginTypes.Managers
 import core.tools.Log
 import core.tools.NetworkReachability
+import core.tools.PerformanceProbe
 import core.tools.colorize
 import java.lang.Long.max
 import java.text.SimpleDateFormat
@@ -37,6 +38,7 @@ class MajorUpdateWorker {
         while (running) {
             Grafana.startTick()
             val start = System.currentTimeMillis()
+            val perfTickStart = PerformanceProbe.begin()
             Server.heartbeat()
 
             if (Server.networkReachability == NetworkReachability.Reachable)
@@ -90,6 +92,10 @@ class MajorUpdateWorker {
 
             val end = System.currentTimeMillis()
             Grafana.totalTickTime = (end - start).toInt()
+            PerformanceProbe.tick(
+                (System.nanoTime() - perfTickStart) / 1_000_000.0,
+                GameWorld.Pulser.currentPulses.size
+            )
             Grafana.endTick()
 /*            ServerMonitor.eventQueue.add(GuiEvent.UpdateTickTime(end - start))
             ServerMonitor.eventQueue.add(GuiEvent.UpdatePulseCount(GameWorld.Pulser.TASKS.size))*/
@@ -107,31 +113,52 @@ class MajorUpdateWorker {
 
     fun handleTickActions(skipPulseUpdate: Boolean = false) {
         try {
-            var packetStart = System.currentTimeMillis()
+            var probe = PerformanceProbe.begin()
+            val packetStart = System.currentTimeMillis()
             PacketProcessor.processQueue()
             Grafana.packetProcessTime = (System.currentTimeMillis() - packetStart).toInt()
+            PerformanceProbe.phase("packets.process", probe)
 
-            //disconnect all players waiting to be disconnected
+            probe = PerformanceProbe.begin()
             Repository.disconnectionQueue.update()
+            PerformanceProbe.phase("disconnect.update", probe)
 
             if (!skipPulseUpdate) {
+                probe = PerformanceProbe.begin()
                 GameWorld.Pulser.updateAll()
+                PerformanceProbe.phase("pulses.update", probe)
             }
+
+            probe = PerformanceProbe.begin()
             GameWorld.tickListeners.forEach { it.tick() }
+            PerformanceProbe.phase("tickListeners", probe)
 
+            probe = PerformanceProbe.begin()
             sequence.start()
-            sequence.run()
-            sequence.end()
+            PerformanceProbe.phase("update.start", probe)
 
-            //increment global ticks variable
+            probe = PerformanceProbe.begin()
+            sequence.run()
+            PerformanceProbe.phase("update.run", probe)
+
+            probe = PerformanceProbe.begin()
+            sequence.end()
+            PerformanceProbe.phase("update.end", probe)
+
+            probe = PerformanceProbe.begin()
             GameWorld.pulse()
-            //tick all manager plugins
+            PerformanceProbe.phase("world.pulse", probe)
+
+            probe = PerformanceProbe.begin()
             Managers.tick()
+            PerformanceProbe.phase("managers.tick", probe)
         } catch (e: Exception) {
             e.printStackTrace()
         } finally {
             try {
+                val probe = PerformanceProbe.begin()
                 PacketWriteQueue.flush()
+                PerformanceProbe.phase("packets.flush", probe)
             } catch (e: Exception) {
                 e.printStackTrace()
             }
