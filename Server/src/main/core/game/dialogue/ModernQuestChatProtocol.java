@@ -120,7 +120,7 @@ public final class ModernQuestChatProtocol {
     ) {
         player.getPacketDispatch().sendRunScript(
             RUNSCRIPT_ID,
-            payload
+            new Object[] { payload }
         );
     }
 
