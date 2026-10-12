@@ -16,6 +16,7 @@ import core.cache.def.impl.SceneryDefinition
 import core.game.container.Container
 import core.game.container.impl.BankContainer
 import core.game.event.ButtonClickEvent
+import core.game.dialogue.ModernQuestChatProtocol
 import core.game.ge.GrandExchange.Companion.getOfferStats
 import core.game.ge.GrandExchange.Companion.getRecommendedPrice
 import core.game.ge.GrandExchangeOffer
