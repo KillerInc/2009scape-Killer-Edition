@@ -215,6 +215,10 @@ object PacketProcessor {
                 pkt.player.interfaceManager.closeChatbox()
             }
             is Packet.Command -> {
+                if (pkt.commandLine == "killer_cap modern_quest_chat 1") {
+                    ModernQuestChatProtocol.enable(pkt.player)
+                    return
+                }
                 PlayerMonitor.log(pkt.player, LogType.COMMAND, pkt.commandLine)
                 CommandSystem.commandSystem.parse(pkt.player, pkt.commandLine)
             }
