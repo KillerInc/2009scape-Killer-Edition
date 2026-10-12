@@ -22,6 +22,7 @@ object PerformanceProbe {
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.ROOT)
     private val phaseStats = ConcurrentHashMap<String, Stat>()
     private val pulseStats = ConcurrentHashMap<String, Stat>()
+    private val counters = ConcurrentHashMap<String, Long>()
     private val gcBeans = ManagementFactory.getGarbageCollectorMXBeans()
     private val memoryBean = ManagementFactory.getMemoryMXBean()
 
@@ -60,6 +61,10 @@ object PerformanceProbe {
             out(stamp() + " SLOW_PHASE name=" + name + " ms=" + fmt(ms) + " tick=" + GameWorld.ticks)
         }
         return ms
+    }
+
+    fun counter(name: String, amount: Long = 1L) {
+        counters.merge(name, amount) { a, b -> a + b }
     }
 
     fun recordPulse(name: String, elapsedNs: Long) {
@@ -108,6 +113,10 @@ object PerformanceProbe {
                     ",n=" + it.value.count + ")"
             }
 
+        val counterText = counters.entries
+            .sortedBy { it.key }
+            .joinToString(" ") { it.key + "=" + it.value }
+
         val pulses = pulseStats.entries
             .sortedByDescending { it.value.totalMs }
             .take(TOP_PULSES)
@@ -132,12 +141,16 @@ object PerformanceProbe {
                 " gcTimeMsDelta=" + max(0L, currentGcTime - lastGcTime)
         )
         out(stamp() + " PHASES " + phases)
+        if (counterText.isNotEmpty()) {
+            out(stamp() + " COUNTERS " + counterText)
+        }
         if (pulses.isNotEmpty()) {
             out(stamp() + " TOP_PULSES " + pulses)
         }
 
         phaseStats.clear()
         pulseStats.clear()
+        counters.clear()
         windowStartMs = now
         lastGcCount = currentGcCount
         lastGcTime = currentGcTime
