@@ -201,7 +201,7 @@ jobs:
           find "$FULL" -type f -printf '%P\n' | sort
           echo "File count: $(find "$FULL" -type f | wc -l)"
 
-      - name: Create or update GitHub Release
+      - name: Create GitHub Release (immutable)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.package.outputs.tag }}
@@ -250,14 +250,14 @@ jobs:
             "$CACHE_PATH"
           )
 
+          # Server releases are immutable. Never replace assets or edit a
+          # previously published clean version. Bump VERSION before releasing.
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" "${ASSETS[@]}" --clobber
-            gh release edit "$TAG" \
-              --title "2009Scape Killer Edition $TAG" \
-              --notes "$NOTES"
-          else
-            gh release create "$TAG" "${ASSETS[@]}" \
-              --target "${GITHUB_SHA}" \
-              --title "2009Scape Killer Edition $TAG" \
-              --notes "$NOTES"
+            echo "::error::Release $TAG already exists. Refusing to overwrite a published server version."
+            exit 1
           fi
+
+          gh release create "$TAG" "${ASSETS[@]}" \
+            --target "${GITHUB_SHA}" \
+            --title "2009Scape Killer Edition $TAG" \
+            --notes "$NOTES"
