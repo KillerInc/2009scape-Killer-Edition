@@ -302,12 +302,16 @@ public final class CharacterDesign {
 	 */
 	public static void randomize(Player player, boolean head) {
 		if (head) {
+			// Head randomise is scoped strictly to the Head tab:
+			// hair/facial-hair appearance plus Hair and Skin colours.
 			changeLook(player, 0, RandomFunction.random(2) == 1);
 			changeLook(player, 1, RandomFunction.random(2) == 1);
 			changeColor(player, 0, HAIR_COLORS, 100, RandomFunction.random(100, 124));
 			changeColor(player, 4, SKIN_COLORS, 158, RandomFunction.random(158, 151));
 		} else {
-			for (int i = 0; i < player.getAppearance().getAppearanceCache().length; i++) {
+			// Body randomise must never touch Head settings. Only randomise the
+			// five Body-tab feature groups: Torso, Arms, Wrists, Legs and Feet.
+			for (int i = 2; i <= 6; i++) {
 				changeLook(player, i, RandomFunction.random(2) == 1);
 			}
 			changeColor(player, 2, TORSO_COLORS, 189, RandomFunction.random(189, 217));
