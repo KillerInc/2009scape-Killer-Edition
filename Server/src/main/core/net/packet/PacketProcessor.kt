@@ -17,6 +17,7 @@ import core.game.container.Container
 import core.game.container.impl.BankContainer
 import core.game.event.ButtonClickEvent
 import core.game.dialogue.ModernQuestChatProtocol
+import core.game.dialogue.ModernTutorialUiProtocol
 import core.game.ge.GrandExchange.Companion.getOfferStats
 import core.game.ge.GrandExchange.Companion.getRecommendedPrice
 import core.game.ge.GrandExchangeOffer
@@ -218,6 +219,11 @@ object PacketProcessor {
             is Packet.Command -> {
                 if (pkt.commandLine == "killer_cap modern_quest_chat 1") {
                     ModernQuestChatProtocol.enable(pkt.player)
+                    return
+                }
+                if (pkt.commandLine == "killer_cap modern_tutorial_ui 1") {
+                    ModernTutorialUiProtocol.enable(pkt.player)
+                    ModernTutorialUiProtocol.sendCurrentState(pkt.player)
                     return
                 }
                 PlayerMonitor.log(pkt.player, LogType.COMMAND, pkt.commandLine)
