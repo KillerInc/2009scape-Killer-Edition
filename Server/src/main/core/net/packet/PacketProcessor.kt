@@ -226,6 +226,14 @@ object PacketProcessor {
                     ModernTutorialUiProtocol.sendCurrentState(pkt.player)
                     return
                 }
+                if (pkt.commandLine.startsWith("killer_modern_tab ")) {
+                    val slot = pkt.commandLine
+                        .substringAfter("killer_modern_tab ")
+                        .toIntOrNull()
+                        ?: return
+                    ModernTutorialUiProtocol.selectTab(pkt.player, slot)
+                    return
+                }
                 PlayerMonitor.log(pkt.player, LogType.COMMAND, pkt.commandLine)
                 CommandSystem.commandSystem.parse(pkt.player, pkt.commandLine)
             }
