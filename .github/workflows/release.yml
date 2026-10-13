@@ -259,7 +259,7 @@ jobs:
 
           RELEASE_CHANNEL_ARGS=()
           RELEASE_TITLE="2009Scape Killer Edition $TAG"
-          if [[ "$VERSION" =~ ^[0-9]+\\.[0-9]+\\.[0-9]+-PR[0-9]+$ ]]; then
+          if [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+-PR[0-9]+$ ]]; then
             RELEASE_CHANNEL_ARGS+=(--prerelease)
             RELEASE_TITLE="$RELEASE_TITLE [PRE-RELEASE]"
           fi
