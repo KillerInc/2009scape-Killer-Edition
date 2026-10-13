@@ -2,6 +2,7 @@ package content.region.misc.tutisland.handlers
 
 import core.api.*
 import core.game.component.Component
+import core.game.dialogue.ModernTutorialUiProtocol
 import content.region.misc.tutisland.handlers.iface.CharacterDesign
 import core.game.node.Node
 import core.game.node.entity.combat.equipment.WeaponInterface
@@ -508,6 +509,12 @@ object TutorialStage {
                 sendStageDialog(player, stage)
             }
         }
+
+        ModernTutorialUiProtocol.sendState(
+            player,
+            stage,
+            ModernTutorialUiProtocol.highlightedTabForStage(stage)
+        )
     }
 
     @JvmStatic
