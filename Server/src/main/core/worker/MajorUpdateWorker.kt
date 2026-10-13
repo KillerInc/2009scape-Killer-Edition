@@ -123,6 +123,7 @@ class MajorUpdateWorker {
             Repository.disconnectionQueue.update()
             PerformanceProbe.phase("disconnect.update", probe)
 
+            BackgroundWorkers.drain()
             if (!skipPulseUpdate) {
                 probe = PerformanceProbe.begin()
                 GameWorld.Pulser.updateAll()

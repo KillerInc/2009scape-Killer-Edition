@@ -56,6 +56,7 @@ import core.api.utils.Vector
 import kotlin.random.Random
 
 class ScriptAPI(private val bot: Player) {
+    private val decisionPlanner = BotDecisionPlanner()
     val GRAPHICSUP = Graphics(1576)
     val ANIMATIONUP = Animation(8939)
     val GRAPHICSDOWN = Graphics(1577)
@@ -204,10 +205,23 @@ class ScriptAPI(private val bot: Player) {
         var entity: Node? = null
         var minDistance = Double.MAX_VALUE
         val maxDistance = ServerConstants.MAX_PATHFIND_DISTANCE.toDouble()
-        for (e in list) {
-            if (evaluateViability(e, minDistance, maxDistance, acceptedName, acceptedId, acceptedPredicate)) {
-                entity = e
-                minDistance = distance(bot, e)
+        // Pure coordinate ranking is computed off-thread and reused only while the
+        // bot is at the same location. Predicates retain their original iteration order.
+        val order = if (acceptedPredicate == null) decisionPlanner.order(bot.location, list) else null
+        if (order == null) {
+            for (e in list) {
+                if (evaluateViability(e, minDistance, maxDistance, acceptedName, acceptedId, acceptedPredicate)) {
+                    entity = e
+                    minDistance = distance(bot, e)
+                }
+            }
+        } else {
+            for (index in order) {
+                val e = list[index]
+                if (evaluateViability(e, minDistance, maxDistance, acceptedName, acceptedId, acceptedPredicate)) {
+                    entity = e
+                    minDistance = distance(bot, e)
+                }
             }
         }
         return entity
@@ -539,8 +553,8 @@ class ScriptAPI(private val bot: Player) {
                         )
                     }
                     bot.bank.remove(item)
-                    bot.bank.refresh()
                 }
+                bot.bank.refresh()
                 return true
             }
         }
@@ -564,23 +578,16 @@ class ScriptAPI(private val bot: Player) {
                         actualId = Item(actualId).noteChange
                     }
                     val canSell = GrandExchange.addBotOffer(actualId, itemAmt)
-                    if (canSell && saleIsBigNews(actualId, itemAmt)) {
-                        when (actualId){
-                            1511 -> continue
-                            1513 -> continue
-                            1515 -> continue
-                            1517 -> continue
-                            1519 -> continue
-                            1521 -> continue
-                            else -> Repository.sendGrandExchangeNews(
-                                SERVER_GE_NAME + " just offered " + itemAmt + " " +
-                                    ItemDefinition.forId(actualId).name.lowercase() + " on the GE."
-                            )
-                        }
+                    if (canSell && saleIsBigNews(actualId, itemAmt) &&
+                        actualId !in setOf(1511, 1513, 1515, 1517, 1519, 1521)) {
+                        Repository.sendGrandExchangeNews(
+                            SERVER_GE_NAME + " just offered " + itemAmt + " " +
+                                ItemDefinition.forId(actualId).name.lowercase() + " on the GE."
+                        )
                     }
                     bot.bank.remove(item)
-                    bot.bank.refresh()
                 }
+                bot.bank.refresh()
                 return true
             }
         }

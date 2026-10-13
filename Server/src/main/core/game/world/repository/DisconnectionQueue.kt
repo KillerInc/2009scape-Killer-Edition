@@ -78,14 +78,6 @@ class DisconnectionQueue {
         if (player.isArtificial) {
             return true
         }
-        if (!force) {
-            TaskExecutor.executeSQL {
-                Thread.currentThread().name = "PlayerSave SQL"
-                save(player, true)
-            }
-            log(this::class.java, Log.INFO, "Player cleared. Removed ${player.details.username}.")
-            return true
-        }
         save(player, false)
         log(this::class.java, Log.INFO, "Player cleared. Removed ${player.details.username}.")
         return true
@@ -136,7 +128,7 @@ class DisconnectionQueue {
      */
     fun save(player: Player, sql: Boolean): Boolean {
         try {
-            PlayerParser.saveImmediately(player)
+            core.game.node.entity.player.info.login.PlayerSaveWorker.enqueue(player)
         } catch (t: Throwable) {
             t.printStackTrace()
         }

@@ -3,6 +3,7 @@ package core.game.world
 import core.api.log
 import core.game.system.task.Pulse
 import core.game.bots.GeneralBotCreator
+import core.game.system.task.NodeTask
 import core.tools.Log
 import core.tools.SystemLogger
 import core.tools.PerformanceProbe
@@ -39,7 +40,8 @@ class PulseRunner {
             val elapsedNs = System.nanoTime() - pulseStartNs
             val elapsedTime = elapsedNs / 1_000_000L
 
-            val pulseName = pulse::class.java.name
+            val diagnostic = pulse as? NodeTask.DiagnosticPulse
+            val pulseName = diagnostic?.taskOrigin() ?: pulse::class.java.name
 
             if (pulse is GeneralBotCreator.BotScriptPulse || pulseName.contains("ScriptAPI")) {
                 totalTimeBotPulses += elapsedTime.toInt()
@@ -47,7 +49,8 @@ class PulseRunner {
                 totalTimeOtherPulses += elapsedTime.toInt()
             }
 
-            PerformanceProbe.recordPulse(pulseName, elapsedNs)
+            PerformanceProbe.recordPulse(pulseName, elapsedNs,
+                if (elapsedNs >= 50_000_000L) diagnostic?.taskContext() else null)
             Grafana.addPulseLength (pulseName, elapsedTime.toInt())
             Grafana.countPulse (pulseName)
 

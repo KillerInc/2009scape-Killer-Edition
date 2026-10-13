@@ -77,34 +77,55 @@ public abstract class NodeTask {
 	 * @param n The other nodes.
 	 * @return The pulse used for this task.
 	 */
-	public Pulse schedule(final Node node, final Node... n) {
-		pulse = new Pulse(ticks, node) {
+    public interface DiagnosticPulse {
+        String taskOrigin();
+        String taskContext();
+    }
 
-			@Override
-			public void start() {
-				super.start();
-				NodeTask.this.start(node, n);
-			}
+    private final class ScheduledTaskPulse extends Pulse implements DiagnosticPulse {
+        private final Node node;
+        private final Node[] nodes;
 
-			@Override
-			public boolean pulse() {
-				return exec(node, n);
-			}
+        ScheduledTaskPulse(Node node, Node... nodes) {
+            super(ticks, node);
+            this.node = node;
+            this.nodes = nodes;
+        }
 
-			@Override
-			public void stop() {
-				super.stop();
-				NodeTask.this.stop(node, n);
-			}
+        @Override public void start() {
+            super.start();
+            NodeTask.this.start(node, nodes);
+        }
 
-			@Override
-			public boolean removeFor(String s) {
-				return NodeTask.this.removeFor(s, node, n);
-			}
-		};
-		pulse.start();
-		return pulse;
-	}
+        @Override public boolean pulse() {
+            return NodeTask.this.exec(node, nodes);
+        }
+
+        @Override public void stop() {
+            super.stop();
+            NodeTask.this.stop(node, nodes);
+        }
+
+        @Override public boolean removeFor(String s) {
+            return NodeTask.this.removeFor(s, node, nodes);
+        }
+
+        @Override public String taskOrigin() {
+            return NodeTask.this.getClass().getName();
+        }
+
+        @Override public String taskContext() {
+            if (node == null) return "task=" + taskOrigin();
+            return "task=" + taskOrigin() + ",node=" + node.getClass().getSimpleName() +
+                    ",id=" + node.getId() + ",location=" + node.getLocation();
+        }
+    }
+
+    public Pulse schedule(final Node node, final Node... n) {
+        pulse = new ScheduledTaskPulse(node, n);
+        pulse.start();
+        return pulse;
+    }
 
 	/**
 	 * Gets the Pulse for this Task

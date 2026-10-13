@@ -13,6 +13,7 @@ public final class SystemShutdownHook implements Runnable {
 
 	@Override
 	public void run() {
+        core.game.node.entity.player.info.login.PlayerSaveWorker.flush();
 		if (SystemManager.isTerminated()) {
 			return;
 		}

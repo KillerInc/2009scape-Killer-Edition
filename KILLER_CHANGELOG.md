@@ -1,5 +1,15 @@
 # Killer Edition Changelog
 
+## v0.13.1-PR1 — Pre-release (experimental)
+
+- Added bounded background planning workers with main-tick callback handoff.
+- Added immutable collision-snapshot asynchronous pathfinding API. Game actions remain on the main thread; integration remains conservative until path validation tests are complete.
+- Added background bot target-ranking, with synchronous fallback and unchanged gameplay action execution.
+- Moved periodic and disconnect player save disk writes onto a dedicated ordered I/O worker, with snapshots on the game tick and shutdown flushing.
+- Moved performance-log file writes off the tick thread; added background timing and queue counters.
+- Replaced anonymous NodeTask pulse wrappers with origin-identifiable task pulses and contextual slow-task logging.
+- Batched GE bot bank refreshes and corrected log-only item exclusions so they do not skip item removal.
+
 ## v0.13.1 — Stable updater baseline
 
 - Added opt-in **Pre-Release Downloads** setting to the server GUI (off by default), persisted locally.

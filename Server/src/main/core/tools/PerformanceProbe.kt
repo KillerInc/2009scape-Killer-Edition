@@ -10,6 +10,8 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.max
 
 object PerformanceProbe {
@@ -23,6 +25,9 @@ object PerformanceProbe {
     private val phaseStats = ConcurrentHashMap<String, Stat>()
     private val pulseStats = ConcurrentHashMap<String, Stat>()
     private val counters = ConcurrentHashMap<String, Long>()
+    private val backgroundStats = ConcurrentHashMap<String, Stat>()
+    private val ioQueue = ArrayBlockingQueue<String>(16384)
+    private val droppedLogLines = AtomicLong()
     private val gcBeans = ManagementFactory.getGarbageCollectorMXBeans()
     private val memoryBean = ManagementFactory.getMemoryMXBean()
 
@@ -32,8 +37,24 @@ object PerformanceProbe {
     private var lastGcCount = gcCount()
     private var lastGcTime = gcTime()
 
-    @Synchronized
+    init {
+        Thread({
+            while (true) {
+                try {
+                    writeLine(ioQueue.take())
+                } catch (_: InterruptedException) {
+                    break
+                }
+            }
+        }, "killer-performance-log-io").apply { isDaemon = true; start() }
+    }
+
+    // Game and worker threads only enqueue immutable strings; disk I/O never blocks a tick.
     private fun out(line: String) {
+        if (!ioQueue.offer(line)) droppedLogLines.incrementAndGet()
+    }
+
+    private fun writeLine(line: String) {
         try {
             if (writer == null) {
                 val dir = File("logs")
@@ -43,13 +64,17 @@ object PerformanceProbe {
                 writer!!.newLine()
                 writer!!.write("# started=" + dateFormat.format(Date()))
                 writer!!.newLine()
-                writer!!.flush()
             }
             writer!!.write(line)
             writer!!.newLine()
             writer!!.flush()
         } catch (_: Throwable) {
+            droppedLogLines.incrementAndGet()
         }
+    }
+
+    fun recordBackground(name: String, elapsedNs: Long) {
+        backgroundStats.computeIfAbsent(name) { Stat() }.add(elapsedNs / 1_000_000.0)
     }
 
     fun begin(): Long = System.nanoTime()
@@ -67,11 +92,11 @@ object PerformanceProbe {
         counters.merge(name, amount) { a, b -> a + b }
     }
 
-    fun recordPulse(name: String, elapsedNs: Long) {
+    fun recordPulse(name: String, elapsedNs: Long, detail: String? = null) {
         val ms = elapsedNs / 1_000_000.0
         pulseStats.computeIfAbsent(name) { Stat() }.add(ms)
         if (ms >= SLOW_PHASE_MS) {
-            out(stamp() + " SLOW_PULSE name=" + name + " ms=" + fmt(ms) + " tick=" + GameWorld.ticks)
+            out(stamp() + " SLOW_PULSE name=" + name + " ms=" + fmt(ms) + " tick=" + GameWorld.ticks + (if (detail == null) "" else " context=" + detail))
         }
     }
 
@@ -104,6 +129,9 @@ object PerformanceProbe {
         val currentGcCount = gcCount()
         val currentGcTime = gcTime()
         val realPlayers = Repository.players.count { it != null && !it.isArtificial }
+
+        val lost = droppedLogLines.getAndSet(0)
+        if (lost > 0) counter("performance.log.dropped", lost)
 
         val phases = phaseStats.entries
             .sortedByDescending { it.value.totalMs }
@@ -141,6 +169,10 @@ object PerformanceProbe {
                 " gcTimeMsDelta=" + max(0L, currentGcTime - lastGcTime)
         )
         out(stamp() + " PHASES " + phases)
+        val background = backgroundStats.entries.sortedByDescending { it.value.totalMs }.joinToString(" ") {
+            it.key + "(avg=" + fmt(it.value.avg()) + ",max=" + fmt(it.value.maxMs) + ",n=" + it.value.count + ")"
+        }
+        if (background.isNotEmpty()) out(stamp() + " BACKGROUND " + background)
         if (counterText.isNotEmpty()) {
             out(stamp() + " COUNTERS " + counterText)
         }
@@ -150,6 +182,7 @@ object PerformanceProbe {
 
         phaseStats.clear()
         pulseStats.clear()
+        backgroundStats.clear()
         counters.clear()
         windowStartMs = now
         lastGcCount = currentGcCount

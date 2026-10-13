@@ -115,13 +115,15 @@ object GameWorld {
 
     fun pulse() {
         ticks++
-        if (ticks % 50 == 0) {
-            TaskExecutor.execute {
-                val player = Repository.players
+        // Stagger snapshots across 50 ticks rather than freezing the world to save
+        // every online player on the same tick. The disk write is always asynchronous.
+        val slot = ticks % 50
+        Repository.players.forEachIndexed { index, player ->
+            if (index % 50 == slot && player != null && !player.isArtificial && player.isPlaying) {
                 try {
-                    player.stream().filter { obj: Player? -> Objects.nonNull(obj) }.filter { p: Player -> !p.isArtificial && p.isPlaying }.forEach { p: Player? -> Repository.disconnectionQueue.save(p!!, false) }
-                } catch (t: Throwable) {
-                    t.printStackTrace()
+                    core.game.node.entity.player.info.login.PlayerSaveWorker.enqueue(player)
+                } catch (error: Throwable) {
+                    log(GameWorld::class.java, Log.ERR, "Unable to snapshot save for " + player.name + ": " + error.message)
                 }
             }
         }
