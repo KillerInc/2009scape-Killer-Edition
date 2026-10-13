@@ -1,5 +1,12 @@
 # Killer Edition Changelog
 
+## v0.13.1 — Stable updater baseline
+
+- Added opt-in **Pre-Release Downloads** setting to the server GUI (off by default), persisted locally.
+- Update checker discovers published PR releases only when opted in; stable users continue to use GitHub's latest stable release.
+- Prevents automatic downgrades; adds release workflow pre-release tagging for `-PRN` builds.
+- This baseline contains the update-channel capability, not the parallel server changes; those begin at `v0.13.1-PR1`.
+
 This file tracks **Killer Edition changes only**. Upstream/project changelogs and release notes are intentionally left untouched.
 
 ## v0.10 — 2026-10-04

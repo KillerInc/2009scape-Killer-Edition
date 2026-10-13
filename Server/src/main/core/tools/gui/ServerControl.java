@@ -16,12 +16,18 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Locale;
 import java.util.Properties;
+import org.json.simple.JSONArray;
+import org.json.simple.JSONObject;
+import org.json.simple.parser.JSONParser;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
 public final class ServerControl {
     private static final String UPDATE_MANIFEST_URL =
             "https://github.com/KillerInc/2009scape-Killer-Edition/releases/latest/download/update-manifest.properties";
+    private static final String RELEASES_API =
+            "https://api.github.com/repos/KillerInc/2009scape-Killer-Edition/releases?per_page=50";
+    private static final String PRERELEASE_TAG_PATTERN = "v\\d+\\.\\d+\\.\\d+-PR\\d+";
 
     private final JFrame frame = new JFrame("2009Scape Killer Edition - Server Control");
     private final JTextArea logArea = new JTextArea();
@@ -42,6 +48,8 @@ public final class ServerControl {
     private final JButton cancelCountdownButton = new JButton("Cancel Countdown");
     private final JButton updateButton = new JButton("Update");
     private final JButton checkVersionButton = new JButton("Check Version");
+    private final JCheckBox preReleaseToggle = new JCheckBox("Pre-Release Downloads");
+    private volatile int updateCheckGeneration = 0;
 
     private final JTextField commandField = new JTextField();
     private final JButton sendButton = new JButton("Send");
@@ -88,6 +96,7 @@ public final class ServerControl {
         javaExe = Paths.get(System.getProperty("java.home"), "bin", exe);
 
         cleanupUpdateStage();
+        preReleaseToggle.setSelected(loadPreReleasePreference());
         buildUi();
         updateButtons();
         startTimers();
@@ -133,6 +142,8 @@ public final class ServerControl {
         JPanel updatePanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
         checkVersionButton.setPreferredSize(new Dimension(120, 28));
         updateButton.setPreferredSize(new Dimension(150, 28));
+        preReleaseToggle.setToolTipText("Opt in to experimental PR releases. Stable releases remain the default.");
+        updatePanel.add(preReleaseToggle);
         updatePanel.add(checkVersionButton);
         updatePanel.add(updateButton);
         statusPanel.add(updatePanel, BorderLayout.EAST);
@@ -186,6 +197,13 @@ public final class ServerControl {
             }
         });
 
+        preReleaseToggle.addActionListener(e -> {
+            savePreReleasePreference(preReleaseToggle.isSelected());
+            latestManifest = null;
+            latestVersion = null;
+            append("[UPDATE] Channel: " + (preReleaseToggle.isSelected() ? "Pre-Release (experimental)" : "Stable"));
+            checkForUpdates(false);
+        });
         checkVersionButton.addActionListener(e -> checkForUpdates(true));
         updateButton.addActionListener(e -> handleUpdateButton());
 
@@ -485,6 +503,8 @@ public final class ServerControl {
     }
 
     private void checkForUpdates(boolean interactive) {
+        final int generation = ++updateCheckGeneration;
+        final boolean allowPreRelease = preReleaseToggle.isSelected();
         checkVersionButton.setEnabled(false);
         updateButton.setEnabled(false);
         updateLabel.setText("Checking...");
@@ -492,22 +512,24 @@ public final class ServerControl {
         Thread t = new Thread(() -> {
             try {
                 Properties manifest = new Properties();
-                try (InputStream in = openUrl(new URL(UPDATE_MANIFEST_URL))) {
+                URL manifestUrl = resolveManifestUrl(allowPreRelease);
+                try (InputStream in = openUrl(manifestUrl)) {
                     manifest.load(new InputStreamReader(in, StandardCharsets.UTF_8));
                 }
 
                 String version = requiredManifest(manifest, "version");
-                latestManifest = manifest;
-                latestVersion = version;
-
                 String local = readLocalVersion();
                 boolean patchRequired = hasPendingComponentChanges(manifest);
 
                 SwingUtilities.invokeLater(() -> {
+                    if (generation != updateCheckGeneration) return;
+                    latestManifest = manifest;
+                    latestVersion = version;
                     versionLabel.setText(local);
 
                     if (!patchRequired) {
-                        updateLabel.setText("Up to date");
+                        boolean ahead = compareVersions(local, version) > 0;
+                        updateLabel.setText(ahead ? "Ahead of selected channel" : "Up to date");
                         updateButton.setText("Update");
                         if (interactive) {
                             JOptionPane.showMessageDialog(frame,
@@ -516,7 +538,7 @@ public final class ServerControl {
                                     JOptionPane.INFORMATION_MESSAGE);
                         }
                     } else {
-                        updateLabel.setText("v" + version + " available");
+                        updateLabel.setText("v" + version + (version.contains("-PR") ? " (PR)" : "") + " available");
                         updateButton.setText("Update to v" + version);
                         if (interactive) {
                             JOptionPane.showMessageDialog(frame,
@@ -531,6 +553,7 @@ public final class ServerControl {
                 });
             } catch (Exception ex) {
                 SwingUtilities.invokeLater(() -> {
+                    if (generation != updateCheckGeneration) return;
                     updateLabel.setText("Check failed");
                     checkVersionButton.setEnabled(true);
                     updateButton.setEnabled(true);
@@ -558,6 +581,8 @@ public final class ServerControl {
     }
 
     private boolean hasPendingComponentChanges(Properties manifest) throws IOException {
+        // Never silently roll back from PR to its earlier stable base or from any newer release.
+        if (compareVersions(readLocalVersion(), requiredManifest(manifest, "version")) > 0) return false;
         Properties installed = loadInstalledComponents();
         int count = Integer.parseInt(manifest.getProperty("component.count", "0"));
         if (count <= 0) {
@@ -622,6 +647,7 @@ public final class ServerControl {
         if (confirm != JOptionPane.YES_OPTION) return;
 
         updateButton.setEnabled(false);
+        preReleaseToggle.setEnabled(false);
         updateLabel.setText("Downloading...");
 
         Thread t = new Thread(() -> {
@@ -665,6 +691,7 @@ public final class ServerControl {
                         updateLabel.setText("Up to date");
                         updateButton.setText("Update");
                         updateButton.setEnabled(true);
+                        preReleaseToggle.setEnabled(true);
                         JOptionPane.showMessageDialog(frame,
                                 "No patch required.\nThis installation already matches the latest component hashes.",
                                 "Updates",
@@ -706,6 +733,7 @@ public final class ServerControl {
                 SwingUtilities.invokeLater(() -> {
                     updateLabel.setText("Download failed");
                     updateButton.setEnabled(true);
+                    preReleaseToggle.setEnabled(true);
                     error("Update download failed:\n" + ex.getMessage());
                 });
             }
@@ -741,6 +769,93 @@ public final class ServerControl {
             closeController();
         } catch (Exception ex) {
             error("Could not launch updater:\n" + ex.getMessage());
+        }
+    }
+
+
+    private boolean loadPreReleasePreference() {
+        Path file = installRoot.resolve(".killer-updater.properties");
+        if (!Files.isRegularFile(file)) return false;
+        Properties options = new Properties();
+        try (Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
+            options.load(reader);
+            return Boolean.parseBoolean(options.getProperty("allow.prerelease", "false"));
+        } catch (IOException ex) {
+            return false;
+        }
+    }
+
+    private void savePreReleasePreference(boolean enabled) {
+        Properties options = new Properties();
+        options.setProperty("allow.prerelease", Boolean.toString(enabled));
+        try (Writer writer = Files.newBufferedWriter(installRoot.resolve(".killer-updater.properties"),
+                StandardCharsets.UTF_8)) {
+            options.store(writer, "Killer Edition updater settings");
+        } catch (IOException ex) {
+            append("[UPDATE] Cannot save update-channel preference: " + ex.getMessage());
+        }
+    }
+
+    private static URL resolveManifestUrl(boolean allowPreRelease) throws Exception {
+        if (!allowPreRelease) return new URL(UPDATE_MANIFEST_URL);
+        // GitHub /releases/latest excludes pre-releases. Read the API only for opt-in users,
+        // select the newest published release, then fetch that release's named manifest asset.
+        try (InputStream in = openUrl(new URL(RELEASES_API));
+             Reader reader = new InputStreamReader(in, StandardCharsets.UTF_8)) {
+            JSONArray releases = (JSONArray) new JSONParser().parse(reader);
+            JSONObject newest = null;
+            String newestDate = "";
+            for (Object entry : releases) {
+                if (!(entry instanceof JSONObject)) continue;
+                JSONObject release = (JSONObject) entry;
+                if (Boolean.TRUE.equals(release.get("draft"))) continue;
+                boolean prerelease = Boolean.TRUE.equals(release.get("prerelease"));
+                String tag = String.valueOf(release.get("tag_name"));
+                if (prerelease && !tag.matches(PRERELEASE_TAG_PATTERN)) continue;
+                String published = String.valueOf(release.get("published_at"));
+                if ("null".equals(published)) continue;
+                if (newest == null || published.compareTo(newestDate) > 0) {
+                    newest = release;
+                    newestDate = published;
+                }
+            }
+            if (newest != null) {
+                Object assetsRaw = newest.get("assets");
+                if (assetsRaw instanceof JSONArray) {
+                    for (Object assetRaw : (JSONArray) assetsRaw) {
+                        if (!(assetRaw instanceof JSONObject)) continue;
+                        JSONObject asset = (JSONObject) assetRaw;
+                        if ("update-manifest.properties".equals(asset.get("name"))) {
+                            String url = String.valueOf(asset.get("browser_download_url"));
+                            if (url.startsWith("https://github.com/")) return new URL(url);
+                        }
+                    }
+                }
+            }
+        }
+        return new URL(UPDATE_MANIFEST_URL);
+    }
+
+    // A release tagged 0.13.1-PR1 is older than the final 0.13.1,
+    // but a PR1 on the 0.13.1 testing channel is never a valid stable-channel rollback.
+    private static int compareVersions(String a, String b) {
+        try {
+            String[] aParts = a.replaceFirst("^v", "").split("-PR", 2);
+            String[] bParts = b.replaceFirst("^v", "").split("-PR", 2);
+            String[] as = aParts[0].split("\\.");
+            String[] bs = bParts[0].split("\\.");
+            for (int i = 0; i < 3; i++) {
+                int av = i < as.length ? Integer.parseInt(as[i]) : 0;
+                int bv = i < bs.length ? Integer.parseInt(bs[i]) : 0;
+                if (av != bv) return Integer.compare(av, bv);
+            }
+            if (aParts.length == 1 && bParts.length == 2) return 1;
+            if (aParts.length == 2 && bParts.length == 1) return -1;
+            if (aParts.length == 2 && bParts.length == 2)
+                return Integer.compare(Integer.parseInt(aParts[1]), Integer.parseInt(bParts[1]));
+            return 0;
+        } catch (NumberFormatException ex) {
+            return 0; // Unknown legacy version: compare component hashes as before.
         }
     }
 
