@@ -1,5 +1,6 @@
 package core.game.dialogue;
 
+import content.region.misc.tutisland.handlers.TutorialStage;
 import core.game.component.Component;
 import core.game.node.entity.player.Player;
 
@@ -106,6 +107,87 @@ public final class ModernTutorialUiProtocol {
             stage,
             highlighted
         );
+    }
+
+    public static boolean selectTab(
+        Player player,
+        int slot
+    ) {
+        if (!isEnabled(player)
+            || player == null
+            || slot < 0
+            || slot >= MODERN_TAB_COUNT) {
+            return false;
+        }
+
+        Component[] tabs =
+            player.getInterfaceManager().getTabs();
+        if (tabs == null
+            || slot >= tabs.length
+            || tabs[slot] == null) {
+            return false;
+        }
+
+        player.getInterfaceManager().setViewedTab(slot);
+
+        int stage =
+            player.getAttribute(
+                "tutorial:stage",
+                0
+            );
+        int nextStage = nextStageForTabClick(
+            stage,
+            slot
+        );
+        if (nextStage != stage) {
+            player.setAttribute(
+                "tutorial:stage",
+                nextStage
+            );
+            TutorialStage.load(
+                player,
+                nextStage
+            );
+        } else {
+            sendCurrentState(player);
+        }
+
+        return true;
+    }
+
+    private static int nextStageForTabClick(
+        int stage,
+        int slot
+    ) {
+        switch (stage) {
+            case 1:
+                return slot == 11 ? 2 : stage;
+            case 5:
+                return slot == 3 ? 6 : stage;
+            case 10:
+                return slot == 1 ? 11 : stage;
+            case 21:
+                return slot == 13 ? 22 : stage;
+            case 23:
+                return slot == 12 ? 24 : stage;
+            case 27:
+                return slot == 2 ? 28 : stage;
+            case 45:
+            case 46:
+                return slot == 4 ? 46 : stage;
+            case 49:
+                return slot == 0 ? 50 : stage;
+            case 61:
+                return slot == 5 ? 62 : stage;
+            case 63:
+                return slot == 8 ? 64 : stage;
+            case 64:
+                return slot == 9 ? 65 : stage;
+            case 68:
+                return slot == 6 ? 69 : stage;
+            default:
+                return stage;
+        }
     }
 
     public static int highlightedTabForStage(
