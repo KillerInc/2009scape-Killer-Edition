@@ -62,7 +62,7 @@ object PerformanceProbe {
                 writer = BufferedWriter(FileWriter(File(dir, "performance.log"), true), 64 * 1024)
                 writer!!.write("# Killer Edition server performance log")
                 writer!!.newLine()
-                writer!!.write("# started=" + dateFormat.format(Date()))
+                writer!!.write("# started=" + SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.ROOT).format(Date()))
                 writer!!.newLine()
             }
             writer!!.write(line)

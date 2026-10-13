@@ -1,5 +1,11 @@
 # Killer Edition Changelog
 
+## v0.13.1-PR2 — Pre-release (experimental)
+
+- Wired optional asynchronous NPC reachability precomputation into bot target selection. Results are only reused for matching unchanged locations for at most two ticks; cache misses use the original synchronous pathfinder.
+- Limited collision snapshots to one per server tick, with dedicated performance counters and an emergency system-property switch `-Dkiller.parallel.pathfinding=false`.
+- Corrected asynchronous performance-log timestamp formatting to avoid sharing a non-thread-safe date formatter.
+
 ## v0.13.1-PR1 — Pre-release (experimental)
 
 - Added bounded background planning workers with main-tick callback handoff.

@@ -26,6 +26,8 @@ import core.game.system.task.Pulse
 import core.game.world.map.Location
 import core.game.world.map.RegionManager
 import core.game.world.map.path.Pathfinder
+import core.game.world.map.path.AsyncPathfinder
+import core.tools.PerformanceProbe
 import core.game.world.update.flag.context.Animation
 import core.game.world.update.flag.context.ChatMessage
 import core.game.world.update.flag.context.Graphics
@@ -57,6 +59,45 @@ import kotlin.random.Random
 
 class ScriptAPI(private val bot: Player) {
     private val decisionPlanner = BotDecisionPlanner()
+
+    // Async calculations are advisory; live world state remains authoritative.
+    private data class ReachKey(
+        val sx: Int, val sy: Int, val sz: Int, val dx: Int, val dy: Int,
+        val moverSize: Int, val targetSize: Int
+    )
+    private var lastPathKey: ReachKey? = null
+    private var lastPathReachable = false
+    private var lastPathCompletedTick = -10000
+    private var pendingPath = false
+    private var lastPathRequestTick = -10000
+
+    private fun canReachCandidate(candidate: Node): Boolean {
+        if (candidate is NPC && bot.isArtificial &&
+            System.getProperty("killer.parallel.pathfinding", "true") != "false") {
+            val origin = bot.location
+            val dest = candidate.location
+            val key = ReachKey(origin.x, origin.y, origin.z, dest.x, dest.y,
+                bot.size(), candidate.size())
+            val tick = GameWorld.ticks
+            if (lastPathKey == key && lastPathReachable && tick - lastPathCompletedTick <= 2) {
+                PerformanceProbe.counter("background.paths.used")
+                return true
+            }
+            if (pendingPath && tick - lastPathRequestTick > 25) pendingPath = false
+            if (!pendingPath && tick - lastPathRequestTick >= 15 &&
+                origin.z == dest.z && origin.withinDistance(dest, ServerConstants.MAX_PATHFIND_DISTANCE)) {
+                lastPathRequestTick = tick
+                pendingPath = AsyncPathfinder.plan(origin, dest, bot.size(), candidate.size()) { path ->
+                    lastPathKey = key
+                    lastPathReachable = !path.isMoveNear
+                    lastPathCompletedTick = GameWorld.ticks
+                    pendingPath = false
+                }
+            }
+        }
+        // No waiting on a worker. A cache miss has exactly the old behavior.
+        return !Pathfinder.find(bot, candidate).isMoveNear
+    }
     val GRAPHICSUP = Graphics(1576)
     val ANIMATIONUP = Animation(8939)
     val GRAPHICSDOWN = Graphics(1577)
@@ -194,10 +235,10 @@ class ScriptAPI(private val bot: Player) {
             return false
 
         if (acceptedPredicate != null) {
-            return acceptedPredicate(e) && !Pathfinder.find(bot, e).isMoveNear
+            return acceptedPredicate(e) && canReachCandidate(e)
         } else {
             val name = e?.name
-            return (acceptedNames?.stream()?.anyMatch({ s -> s.equals(name, true) }) ?: true && !Pathfinder.find(bot, e).isMoveNear)
+            return (acceptedNames?.stream()?.anyMatch({ s -> s.equals(name, true) }) ?: true && canReachCandidate(e))
         }
     }
 
