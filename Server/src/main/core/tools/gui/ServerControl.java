@@ -582,7 +582,14 @@ public final class ServerControl {
 
     private boolean hasPendingComponentChanges(Properties manifest) throws IOException {
         // Never silently roll back from PR to its earlier stable base or from any newer release.
-        if (compareVersions(readLocalVersion(), requiredManifest(manifest, "version")) > 0) return false;
+        String current = readLocalVersion();
+        String offered = requiredManifest(manifest, "version");
+        // This opt-in test series intentionally uses the stable 0.13.1 baseline as its anchor.
+        // Permit 0.13.1 -> 0.13.1-PR1 only while the user has explicitly opted in.
+        boolean optingIntoTestSeries = preReleaseToggle.isSelected()
+                && offered.matches("\\d+\\.\\d+\\.\\d+-PR\\d+")
+                && current.equals(offered.substring(0, offered.indexOf("-PR")));
+        if (!optingIntoTestSeries && compareVersions(current, offered) > 0) return false;
         Properties installed = loadInstalledComponents();
         int count = Integer.parseInt(manifest.getProperty("component.count", "0"));
         if (count <= 0) {
